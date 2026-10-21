@@ -1,0 +1,17 @@
+# =============================================================================
+# Gastos Bimonetarios — dependencias base
+# =============================================================================
+# Ejecutar:  .venv\Scripts\python.exe -m pip install -r requirements.txt
+# =============================================================================
+
+nicegui==3.18.0
+openpyxl>=3.1
+httpx>=0.27
+pytest>=8.0
+
+# --- OCR opcional -------------------------------------------------------------
+# Instalar con: pip install -r requirements-ocr.txt
+# rapidocr-onnxruntime>=1.4      # OCR sin binarios externos (recomendado)
+
+# --- PDF opcional (no usado por la aplicación) --------------------------------
+# La app entrega el acta en HTML y el PDF se obtiene desde el navegador.

@@ -1,0 +1,6 @@
+# Normaliza los finales de línea en el índice (LF) para evitar ruido entre
+# herramientas. Los archivos de datos binarios quedan intactos.
+* text=auto eol=lf
+
+*.sqlite3 binary
+*.xlsx binary

@@ -1,0 +1,13 @@
+# =============================================================================
+# Gastos Bimonetarios — dependencias del OCR
+# =============================================================================
+# Instalar ADEMÁS de requirements.txt:
+#   .venv\Scripts\python.exe -m pip install -r requirements-ocr.txt
+#
+# rapidocr-onnxruntime incluye los modelos ONNX en el paquete: no hace falta
+# instalar Tesseract ni ningún binario del sistema.
+# =============================================================================
+
+-r requirements.txt
+
+rapidocr-onnxruntime>=1.2
