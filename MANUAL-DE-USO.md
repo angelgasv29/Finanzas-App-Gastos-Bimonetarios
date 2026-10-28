@@ -197,6 +197,23 @@ Entra a **Registrar**. Arriba verás la tasa que se usará.
 12. Pulsa **Guardar compra**. La compra aparece abajo, en **Movimientos
     recientes**, y todos los paneles se actualizan.
 
+### Repetir una compra
+
+Arriba del formulario está **Autocompletar producto**. Escribe parte del nombre,
+del **SKU**, de la categoría, de la marca o del comercio y elige el producto en
+la lista. El formulario recupera:
+
+- la categoría, marca, unidad, subcategoría y comercio;
+- la cantidad, forma de pago, plataforma de origen, naturaleza y modalidad de IVA;
+- los campos personalizados que se usaron la última vez.
+
+Solo tienes que ajustar la **fecha** si hace falta y escribir el **monto** de la
+compra nueva. La tasa se toma de la sesión actual, no de la compra anterior.
+
+Si escribes un nombre que no está en el catálogo, se crea un **SKU nuevo** al
+guardar, igual que antes. El buscador no modifica la ficha del producto: solo
+rellena el formulario.
+
 > Si la categoría define **campos personalizados** (por ejemplo «Presentación /
 > Empaque», «Nro. Contrato / Medidor» o «Kilometraje»), aparecen al final del
 > formulario. Son propios de esa categoría y se guardan con la compra. Se

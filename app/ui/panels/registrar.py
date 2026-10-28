@@ -74,6 +74,48 @@ def _custom_value(field: dict[str, Any], widget: ui.element) -> Any:
     return widget.value or ""
 
 
+def _product_label(product: dict[str, Any], category_name: str = "") -> str:
+    """Etiqueta buscable del catálogo: nombre, SKU y metadatos útiles."""
+    parts = [
+        product.get("name"),
+        product.get("id"),
+        category_name,
+        product.get("brand"),
+        product.get("provider"),
+        product.get("unit"),
+    ]
+    return " · ".join(str(part) for part in parts if part not in (None, ""))
+
+
+def _last_transaction_for(
+    transactions: list[dict[str, Any]], product: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Compra más reciente del producto, por ``productId`` o por nombre.
+
+    Las compras antiguas pueden no tener ``productId``; en ese caso se comparan
+    por nombre. El desempate usa la fecha y el ``id`` para que el resultado sea
+    estable.
+    """
+    product_id = product.get("id")
+    name_lower = str(product.get("name") or "").casefold()
+    matches: list[dict[str, Any]] = []
+    if product_id:
+        matches = [tx for tx in transactions if tx.get("productId") == product_id]
+    if not matches and name_lower:
+        matches = [
+            tx
+            for tx in transactions
+            if not tx.get("productId")
+            and str(tx.get("productName") or "").casefold() == name_lower
+        ]
+    if not matches:
+        return None
+    return max(
+        matches,
+        key=lambda tx: (str(tx.get("date") or ""), tx.get("id") or 0),
+    )
+
+
 def _build(state: AppState) -> None:
     now_date = dt.date.today().isoformat()
     rate = state.active_rate
@@ -86,6 +128,21 @@ def _build(state: AppState) -> None:
 
     category_options = {cat["id"]: cat["name"] for cat in state.categories}
     first_category = next(iter(category_options))
+    products_sorted = sorted(
+        state.products, key=lambda item: str(item.get("name") or "").casefold()
+    )
+    product_by_id = {
+        product["id"]: product
+        for product in products_sorted
+        if product.get("id")
+    }
+    product_options = {
+        product["id"]: _product_label(
+            product, state.category_name(product.get("categoryId"))
+        )
+        for product in products_sorted
+        if product.get("id")
+    }
 
     with ui.column().classes("w-full gap-4 p-4"):
         with c.card():
@@ -97,6 +154,25 @@ def _build(state: AppState) -> None:
                     else c.chip_html("Sin tasa", "bad")
                 ),
             )
+
+            with ui.row().classes("w-full items-center gap-3"):
+                f_pick = ui.select(
+                    product_options,
+                    label="Autocompletar producto",
+                    with_input=True,
+                    clearable=True,
+                ).props("outlined dense prepend-icon=search").classes(
+                    "w-full md:w-2/3"
+                ).mark("reg-product-picker")
+                ui.html(
+                    '<div class="muted">Filtra por nombre, SKU, categoría, marca '
+                    "o comercio.</div>"
+                ).classes("text-sm")
+
+            autofill_hint = ui.html(
+                '<div class="muted">Elige un producto del catálogo para reutilizar '
+                "sus datos.</div>"
+            ).classes("w-full")
 
             with ui.row().classes("grid grid-cols-2 md:grid-cols-4 gap-3 w-full items-end"):
                 f_date = ui.input("Fecha", value=now_date).props("type=date").classes("w-full")
@@ -127,6 +203,7 @@ def _build(state: AppState) -> None:
 
             custom_box = ui.column().classes("w-full gap-2")
             custom_inputs: dict[str, ui.element] = {}
+            autofill_custom: dict[str, Any] = {}
 
             def render_custom_fields() -> None:
                 """Pinta los ``customFields`` de la categoría elegida."""
@@ -145,7 +222,9 @@ def _build(state: AppState) -> None:
                         "grid grid-cols-1 md:grid-cols-3 gap-3 w-full"
                     ):
                         for field in fields:
-                            custom_inputs[field.get("id")] = _custom_input(field)
+                            custom_inputs[field.get("id")] = _custom_input(
+                                field, autofill_custom.get(field.get("id"))
+                            )
 
             preview = ui.html("").classes("muted")
             alert_box = ui.html("").classes("w-full")
@@ -157,6 +236,9 @@ def _build(state: AppState) -> None:
                 "subcategory": (sub_box, f_sub),
                 "provider": (prov_box, f_prov),
             }
+
+            selected_product_id: str | None = None
+            guard = {"product": False}
 
             def apply_category_fields() -> None:
                 """Muestra solo los campos que habilita la categoría elegida."""
@@ -172,8 +254,19 @@ def _build(state: AppState) -> None:
                     box.set_visibility(visible)
                 render_custom_fields()
 
+            def on_category_change() -> None:
+                if not guard["product"]:
+                    autofill_custom.clear()
+                apply_category_fields()
+
             apply_category_fields()
-            f_cat.on_value_change(lambda _e=None: apply_category_fields())
+            f_cat.on_value_change(lambda _e=None: on_category_change())
+
+            def current_product_name() -> str:
+                value = f_name.value
+                if value in product_by_id:
+                    return str(product_by_id[value].get("name") or "")
+                return str(value or "").strip()
 
             def refresh_preview() -> None:
                 view = vat.vat_preview(
@@ -187,15 +280,16 @@ def _build(state: AppState) -> None:
                     f'{c.chip_html("≈ " + view["vpTotalUsd"])}'
                     f"</div>"
                 )
+                name = current_product_name()
                 history = [
                     tx
                     for tx in state.transactions()
-                    if (tx.get("productName") or "").lower()
-                    == (f_name.value or "").lower()
+                    if (tx.get("productName") or "").casefold()
+                    == name.casefold()
                 ]
                 result = domain_prices.price_alert_for_form(
-                    product_id="",
-                    product_name=f_name.value or "",
+                    product_id=selected_product_id or "",
+                    product_name=name,
                     products=state.products,
                     history=history,
                     quantity=f_qty.value,
@@ -215,8 +309,85 @@ def _build(state: AppState) -> None:
                         kind,
                     )
 
-            for widget in (f_bs, f_mode, f_name, f_qty, f_unit):
+            def apply_product(product: dict[str, Any]) -> None:
+                """Recupera los datos del catálogo y de la última compra."""
+                last = _last_transaction_for(state.transactions(), product)
+                guard["product"] = True
+                try:
+                    f_name.value = str(product.get("name") or "")
+                    f_cat.value = product.get("categoryId") or f_cat.value
+                    f_brand.value = (last or {}).get("brand") or product.get("brand") or ""
+                    f_unit.value = (last or {}).get("unit") or product.get("unit") or "unidad"
+                    f_sub.value = (
+                        (last or {}).get("subcategory")
+                        or product.get("subcategory")
+                        or ""
+                    )
+                    f_prov.value = (
+                        (last or {}).get("provider") or product.get("provider") or ""
+                    )
+                    f_pay.value = (last or {}).get("paymentMethod") or None
+                    f_origin.value = (last or {}).get("originPlatform") or None
+                    f_nature.value = (last or {}).get("nature") or "Recurrente"
+                    f_mode.value = (last or {}).get("taxMode") or "incluido"
+                    f_qty.value = (last or {}).get("quantity")
+                    f_bs.value = 0
+                    f_usd.value = None
+                    autofill_custom.clear()
+                    if last:
+                        autofill_custom.update(last.get("customValues") or {})
+                finally:
+                    guard["product"] = False
+
+                apply_category_fields()
+                if last:
+                    autofill_hint.content = c.chip_html(
+                        "Autocompletado desde la última compra del "
+                        f"{last.get('date') or '—'} · "
+                        f"{state.fmt(last.get('amountUsd'), last.get('amountBs'))} · "
+                        f"SKU {product.get('id')}",
+                        "ok",
+                    )
+                else:
+                    autofill_hint.content = c.chip_html(
+                        f"Producto del catálogo · SKU {product.get('id')}", "brand"
+                    )
+                refresh_preview()
+
+            def on_product_change() -> None:
+                nonlocal selected_product_id
+                value = f_pick.value
+                product = product_by_id.get(value) if value else None
+                if product is None:
+                    selected_product_id = None
+                    autofill_hint.content = (
+                        '<div class="muted">Elige un producto del catálogo para '
+                        "reutilizar sus datos.</div>"
+                    )
+                else:
+                    selected_product_id = product["id"]
+                    apply_product(product)
+                refresh_preview()
+
+            def on_name_change() -> None:
+                nonlocal selected_product_id
+                if guard["product"]:
+                    return
+                product = product_by_id.get(selected_product_id) if selected_product_id else None
+                if product and current_product_name().casefold() != str(
+                    product.get("name") or ""
+                ).casefold():
+                    selected_product_id = None
+                    f_pick.value = None
+                    autofill_hint.content = c.chip_html(
+                        "Producto nuevo: se creará un SKU al guardar.", "warn"
+                    )
+                refresh_preview()
+
+            for widget in (f_bs, f_mode, f_qty, f_unit):
                 widget.on_value_change(lambda _e=None: refresh_preview())
+            f_name.on_value_change(lambda _e=None: on_name_change())
+            f_pick.on_value_change(lambda _e=None: on_product_change())
             f_usd.on_value_change(
                 lambda _e=None: _apply_usd()
             )
@@ -228,26 +399,39 @@ def _build(state: AppState) -> None:
                     refresh_preview()
 
             def reset_form() -> None:
-                f_date.value = now_date
-                f_cat.value = first_category
-                f_name.value = ""
-                f_qty.value = None
-                f_unit.value = "unidad"
-                f_brand.value = ""
-                f_sub.value = ""
-                f_prov.value = ""
-                f_pay.value = None
-                f_origin.value = None
-                f_nature.value = "Recurrente"
-                f_mode.value = "incluido"
-                f_bs.value = 0
-                f_usd.value = None
-                render_custom_fields()
+                nonlocal selected_product_id
+                selected_product_id = None
+                guard["product"] = True
+                try:
+                    f_date.value = now_date
+                    f_cat.value = first_category
+                    f_name.value = ""
+                    f_qty.value = None
+                    f_unit.value = "unidad"
+                    f_brand.value = ""
+                    f_sub.value = ""
+                    f_prov.value = ""
+                    f_pay.value = None
+                    f_origin.value = None
+                    f_nature.value = "Recurrente"
+                    f_mode.value = "incluido"
+                    f_bs.value = 0
+                    f_usd.value = None
+                finally:
+                    guard["product"] = False
+                f_pick.value = None
+                autofill_custom.clear()
+                autofill_hint.content = (
+                    '<div class="muted">Elige un producto del catálogo para '
+                    "reutilizar sus datos.</div>"
+                )
+                apply_category_fields()
                 refresh_preview()
 
             def save() -> None:
+                name = current_product_name()
                 try:
-                    domain_tx.validate(f_cat.value, f_date.value, f_name.value, f_bs.value)
+                    domain_tx.validate(f_cat.value, f_date.value, name, f_bs.value)
                     domain_tx.require_rate(rate)
                 except DomainError as exc:
                     ui.notify(str(exc), type="warning")
@@ -256,12 +440,13 @@ def _build(state: AppState) -> None:
                 product_id, created = domain_tx.resolve_product(
                     state.products,
                     state.workspace,
-                    f_name.value,
+                    name,
                     category_id=f_cat.value,
                     brand=f_brand.value or "",
                     unit=f_unit.value or "",
                     subcategory=f_sub.value or "",
                     provider=f_prov.value or "",
+                    product_id=selected_product_id,
                 )
                 if created is not None:
                     state.repo.put("products", created)
@@ -280,7 +465,7 @@ def _build(state: AppState) -> None:
                     workspace=state.workspace,
                     date=f_date.value,
                     category_id=f_cat.value,
-                    product_name=f_name.value,
+                    product_name=name,
                     rate=rate,
                     bs_amount=f_bs.value,
                     mode=f_mode.value or "incluido",
@@ -334,7 +519,7 @@ def _build(state: AppState) -> None:
                 align_right=(6,),
             )
 
-        # La versión de referencia corregía las compras con ``openTxEditor`` (editar o borrar).
+        # El original corregía las compras con ``openTxEditor`` (editar o borrar).
         if txs:
             with c.card():
                 c.section_title("Corregir un movimiento")
@@ -379,9 +564,9 @@ def _build(state: AppState) -> None:
 def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
     """Editor de una compra (``openTxEditor``, líneas 4278-4400).
 
-    Edita los mismos campos que la versión de referencia y reutiliza
+    Edita los mismos campos que el original y reutiliza
     :func:`app.domain.transactions.apply_edit` para recalcular base, IVA, total y
-    USD. La categoría y el ``productId`` no se tocan (igual que la versión de referencia).
+    USD. La categoría y el ``productId`` no se tocan (igual que el original).
     """
     category = next(
         (item for item in state.categories if item.get("id") == tx.get("categoryId")),
