@@ -214,6 +214,14 @@ Si escribes un nombre que no está en el catálogo, se crea un **SKU nuevo** al
 guardar, igual que antes. El buscador no modifica la ficha del producto: solo
 rellena el formulario.
 
+Los campos **Producto**, **Marca**, **Subcategoría** y **Comercio** también
+muestran coincidencias mientras escribes. No hace falta acertar letra por letra:
+si pones «Central Madeirenze» y ya existe «Central Madeirense», aparece el valor
+existente para que lo elijas con un clic. Si guardas con una errata muy parecida
+y con las mismas palabras, el programa reutiliza el valor existente y avisa; así
+no se crean fichas ni comercios duplicados. Una variante con otra palabra, como
+«Central Madeirense 2», se conserva como un valor distinto.
+
 > Si la categoría define **campos personalizados** (por ejemplo «Presentación /
 > Empaque», «Nro. Contrato / Medidor» o «Kilometraje»), aparecen al final del
 > formulario. Son propios de esa categoría y se guardan con la compra. Se

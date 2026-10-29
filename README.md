@@ -79,7 +79,7 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 - **Catálogo SKU:** generación de códigos `PROD-P-XXXX` / `PROD-W-XXXX`, herencia de metadatos y propagación del nombre al renombrar un producto.
 - **Categorías dinámicas:** cada categoría define qué campos aplican (cantidad, unidad, marca, IVA, naturaleza…) y permite campos personalizados de texto, número, lista y sí/no.
 - **Editor de compras:** corrección y borrado con recálculo bidireccional Bs/USD, vista previa de IVA y validación.
-- **Autocompletado desde el catálogo:** busca por nombre, SKU, categoría, marca o comercio; al elegir un producto recupera sus datos y los de su última compra para no volver a teclearlos.
+- **Autocompletado tolerante a erratas:** busca por nombre, SKU, categoría, marca o comercio; al elegir un producto recupera sus datos y los de su última compra. Si escribes una variante parecida, sugiere el valor existente y evita duplicados al guardar.
 - **Tasa manual persistente:** se guarda en la configuración y sobrevive a la recarga; se libera al sincronizar con el BCV.
 - **OCR de tickets:** flujo con RapidOCR (ONNX, sin binarios externos) o texto pegado, tabla editable e importación por lote.
 - **Multi-tasa histórica:** sincronización opcional con el BCV a través de tres endpoints públicos y selección de la tasa histórica más cercana para cada fecha.
@@ -126,7 +126,7 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 | Excel | openpyxl | Libro de 6 hojas. |
 | OCR | RapidOCR (ONNX) | Opcional; también acepta texto pegado. |
 | Tasas | httpx | Tres endpoints públicos; se usa el primero que responda. |
-| Pruebas | pytest + doctests | 492 pruebas automatizadas. |
+| Pruebas | pytest + doctests | 499 pruebas automatizadas. |
 
 **Arquitectura de ejecución:** un único proceso NiceGUI con SQLite. No hay un backend separado, un frontend estático que compilar ni un servicio externo obligatorio.
 
@@ -260,7 +260,7 @@ La suite cubre, entre otros:
 - persistencia SQLite y repositorio;
 - flujos de interfaz con `nicegui.testing.user_simulation`.
 
-**Estado actual:** 492 pruebas aprobadas.
+**Estado actual:** 499 pruebas aprobadas.
 
 ---
 

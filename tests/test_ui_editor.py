@@ -116,6 +116,59 @@ def test_el_formulario_autocompleta_desde_el_catalogo(tmp_path: Path) -> None:
     asyncio.run(_autocompletar(tmp_path))
 
 
+def test_el_formulario_reutiliza_valores_con_errata(tmp_path: Path) -> None:
+    asyncio.run(_reutilizar_con_errata(tmp_path))
+
+
+async def _reutilizar_con_errata(tmp_path: Path) -> None:
+    state = open_state(tmp_path / "app.sqlite3")
+    state.repo.put(
+        "rates", {"date": "2026-03-15", "value": 40.0, "source": "BCV", "ts": 0}
+    )
+    state.refresh()
+    category, _custom_field = _category_with_text_field(state)
+    state.categories.sort(key=lambda item: item.get("id") != category.get("id"))
+
+    product = {
+        "id": "PROD-P-CAFE",
+        "workspace": "personal",
+        "name": "Café",
+        "name_lower": "café",
+        "categoryId": category["id"],
+        "brand": "Marca X",
+        "unit": "kg",
+        "subcategory": "Bebidas",
+        "provider": "Central Madeirense",
+        "createdAt": 1,
+        "updatedAt": 1,
+    }
+    state.repo.put("products", product)
+    state.refresh()
+
+    def root() -> None:
+        registrar.render(state)
+
+    async with user_simulation(root=root) as user:
+        await user.open("/")
+        await user.should_see("Registrar compra")
+        user.find(marker="reg-product").type("Cafe")
+        user.find(marker="reg-provider").type("Central Madeirenze")
+        await user.should_see("Comercio existente")
+        user.find(marker="reg-bs").clear().type("116")
+        user.find(marker="reg-save").click()
+        await asyncio.sleep(0.1)
+
+    txs = state.transactions()
+    products = list(state.products)
+    state.close()
+
+    assert len(txs) == 1
+    assert txs[0]["productId"] == product["id"]
+    assert txs[0]["productName"] == "Café"
+    assert txs[0]["provider"] == "Central Madeirense"
+    assert len(products) == 1
+
+
 async def _autocompletar(tmp_path: Path) -> None:
     state = open_state(tmp_path / "app.sqlite3")
     state.repo.put(

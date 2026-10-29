@@ -8,7 +8,7 @@ interfaz solo recoge los valores y los muestra.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Callable
 
 from nicegui import ui
 
@@ -19,6 +19,7 @@ from ...core.constants import (
     UNIT_OPTIONS,
     get_origin_label,
 )
+from ...core.suggestions import best_match, normalize_text, similar_values
 from ...domain import prices as domain_prices
 from ...domain import transactions as domain_tx
 from ...domain import vat
@@ -34,9 +35,9 @@ VAT_LABELS = {"exento": "Exento", "incluido": "IVA incluido", "mas_iva": "IVA + 
 def _custom_input(field: dict[str, Any], value: Any = None) -> ui.element:
     """Campo personalizado de una categoría (``customFields``).
 
-    Reproduce los cuatro tipos de la versión de referencia: ``text``, ``number``, ``select`` y
-    ``boolean``. El asterisco marca los obligatorios, igual que el atributo
-    ``required`` del HTML.
+    Reproduce los cuatro tipos de la versión de referencia: ``text``, ``number``,
+    ``select`` y ``boolean``. El asterisco marca los obligatorios, igual que el
+    atributo ``required`` del HTML.
     """
     label = (field.get("label") or "Campo") + (" *" if field.get("required") else "")
     kind = field.get("type") or "text"
@@ -85,6 +86,48 @@ def _product_label(product: dict[str, Any], category_name: str = "") -> str:
         product.get("unit"),
     ]
     return " · ".join(str(part) for part in parts if part not in (None, ""))
+
+
+def _render_suggestions(
+    box: ui.element,
+    query: str,
+    values: list[str],
+    on_pick: Callable[[str], None],
+    *,
+    include_exact: bool = False,
+    label: str = "Quizás quisiste decir",
+) -> None:
+    """Pinta debajo de un campo los valores existentes más parecidos.
+
+    ``include_exact`` sirve para el producto: si el nombre ya existe, conviene
+    ofrecer «Usar ficha existente» para recuperar marca, comercio y última
+    compra. En los demás campos una coincidencia exacta no necesita sugerencia.
+    """
+    box.clear()
+    if not str(query or "").strip():
+        return
+    matches = similar_values(query, values, limit=3, cutoff=0.68)
+    wanted = normalize_text(query)
+    if not include_exact:
+        matches = [
+            item for item in matches if normalize_text(item[0]) != wanted
+        ]
+    if not matches:
+        return
+
+    with box:
+        ui.html(f'<div class="muted text-xs">{label}</div>')
+        with ui.row().classes("w-full gap-1 flex-wrap"):
+            for value, _score, count in matches:
+                if normalize_text(value) == wanted:
+                    text = f"Usar «{value}»"
+                else:
+                    suffix = f" · {count}" if count > 1 else ""
+                    text = f"{value}{suffix}"
+                ui.button(
+                    text,
+                    on_click=lambda selected=value: on_pick(selected),
+                ).props("flat dense no-caps size=sm").classes("text-left")
 
 
 def _last_transaction_for(
@@ -143,6 +186,30 @@ def _build(state: AppState) -> None:
         for product in products_sorted
         if product.get("id")
     }
+    product_names = [
+        str(product.get("name") or "").strip()
+        for product in products_sorted
+        if str(product.get("name") or "").strip()
+    ]
+    product_by_name = {
+        str(product.get("name") or "").strip(): product
+        for product in products_sorted
+        if str(product.get("name") or "").strip()
+    }
+    existing_transactions = state.transactions()
+
+    def existing_values(field: str) -> list[str]:
+        """Valores ya usados en el catálogo o en el histórico."""
+        values: list[str] = []
+        for item in [*state.products, *existing_transactions]:
+            value = str(item.get(field) or "").strip()
+            if value:
+                values.append(value)
+        return values
+
+    provider_values = existing_values("provider")
+    brand_values = existing_values("brand")
+    subcategory_values = existing_values("subcategory")
 
     with ui.column().classes("w-full gap-4 p-4"):
         with c.card():
@@ -179,17 +246,30 @@ def _build(state: AppState) -> None:
                 f_cat = ui.select(
                     category_options, value=first_category, label="Categoría"
                 ).classes("w-full")
-                f_name = ui.input("Producto").classes("w-full").mark("reg-product")
+                with ui.element("div").classes("w-full") as name_box:
+                    f_name = ui.input("Producto").classes("w-full").mark("reg-product")
+                    name_suggest = ui.column().classes("w-full gap-1").mark(
+                        "reg-product-suggestions"
+                    )
                 with ui.element("div").classes("w-full") as qty_box:
                     f_qty = ui.number("Cantidad", value=None, min=0).classes("w-full")
                 with ui.element("div").classes("w-full") as unit_box:
                     f_unit = ui.select(list(UNIT_OPTIONS), value="unidad", label="Unidad").classes("w-full")
                 with ui.element("div").classes("w-full") as brand_box:
-                    f_brand = ui.input("Marca").classes("w-full")
+                    f_brand = ui.input("Marca").classes("w-full").mark("reg-brand")
+                    brand_suggest = ui.column().classes("w-full gap-1").mark(
+                        "reg-brand-suggestions"
+                    )
                 with ui.element("div").classes("w-full") as sub_box:
-                    f_sub = ui.input("Subcategoría").classes("w-full")
+                    f_sub = ui.input("Subcategoría").classes("w-full").mark("reg-subcategory")
+                    sub_suggest = ui.column().classes("w-full gap-1").mark(
+                        "reg-subcategory-suggestions"
+                    )
                 with ui.element("div").classes("w-full") as prov_box:
-                    f_prov = ui.input("Comercio").classes("w-full")
+                    f_prov = ui.input("Comercio").classes("w-full").mark("reg-provider")
+                    prov_suggest = ui.column().classes("w-full gap-1").mark(
+                        "reg-provider-suggestions"
+                    )
                 f_pay = ui.select(list(PAYMENT_METHODS), value=None, label="Forma de pago").classes("w-full")
                 f_origin = ui.select(
                     list(PAYMENT_ORIGINS), value=None, label="Plataforma origen"
@@ -384,9 +464,87 @@ def _build(state: AppState) -> None:
                     )
                 refresh_preview()
 
+            def pick_product_name(value: str) -> None:
+                product = product_by_name.get(value)
+                if product is None:
+                    f_name.value = value
+                    return
+                f_pick.value = product.get("id")
+                if f_pick.value != product.get("id"):
+                    f_name.value = value
+                name_suggest.clear()
+
+            def update_name_suggestions() -> None:
+                if selected_product_id:
+                    name_suggest.clear()
+                    return
+                _render_suggestions(
+                    name_suggest,
+                    str(f_name.value or ""),
+                    product_names,
+                    pick_product_name,
+                    include_exact=True,
+                    label="Producto del catálogo",
+                )
+
+            def pick_brand(value: str) -> None:
+                f_brand.value = value
+                brand_suggest.clear()
+
+            def pick_subcategory(value: str) -> None:
+                f_sub.value = value
+                sub_suggest.clear()
+
+            def pick_provider(value: str) -> None:
+                f_prov.value = value
+                prov_suggest.clear()
+
+            def update_brand_suggestions() -> None:
+                if guard["product"]:
+                    brand_suggest.clear()
+                    return
+                _render_suggestions(
+                    brand_suggest,
+                    str(f_brand.value or ""),
+                    brand_values,
+                    pick_brand,
+                    label="Marca existente",
+                )
+
+            def update_subcategory_suggestions() -> None:
+                if guard["product"]:
+                    sub_suggest.clear()
+                    return
+                _render_suggestions(
+                    sub_suggest,
+                    str(f_sub.value or ""),
+                    subcategory_values,
+                    pick_subcategory,
+                    label="Subcategoría existente",
+                )
+
+            def update_provider_suggestions() -> None:
+                if guard["product"]:
+                    prov_suggest.clear()
+                    return
+                _render_suggestions(
+                    prov_suggest,
+                    str(f_prov.value or ""),
+                    provider_values,
+                    pick_provider,
+                    label="Comercio existente",
+                )
+
+            def on_name_field_change() -> None:
+                on_name_change()
+                update_name_suggestions()
+
             for widget in (f_bs, f_mode, f_qty, f_unit):
                 widget.on_value_change(lambda _e=None: refresh_preview())
-            f_name.on_value_change(lambda _e=None: on_name_change())
+            f_name.on_value_change(lambda _e=None: on_name_field_change())
+            f_brand.on_value_change(lambda _e=None: update_brand_suggestions())
+            f_sub.on_value_change(lambda _e=None: update_subcategory_suggestions())
+            f_prov.on_value_change(lambda _e=None: update_provider_suggestions())
             f_pick.on_value_change(lambda _e=None: on_product_change())
             f_usd.on_value_change(
                 lambda _e=None: _apply_usd()
@@ -420,6 +578,8 @@ def _build(state: AppState) -> None:
                 finally:
                     guard["product"] = False
                 f_pick.value = None
+                for box in (name_suggest, brand_suggest, sub_suggest, prov_suggest):
+                    box.clear()
                 autofill_custom.clear()
                 autofill_hint.content = (
                     '<div class="muted">Elige un producto del catálogo para '
@@ -429,6 +589,7 @@ def _build(state: AppState) -> None:
                 refresh_preview()
 
             def save() -> None:
+                nonlocal selected_product_id
                 name = current_product_name()
                 try:
                     domain_tx.validate(f_cat.value, f_date.value, name, f_bs.value)
@@ -437,15 +598,55 @@ def _build(state: AppState) -> None:
                     ui.notify(str(exc), type="warning")
                     return
 
+                # Una errata no debe crear un producto o un comercio paralelo.
+                # Solo se corrige cuando el parecido es alto y tiene las mismas
+                # palabras; así «Central Madeirense 2» sigue siendo una variante.
+                corrections: list[str] = []
+                product_match = best_match(name, product_names)
+                matched_product = (
+                    product_by_name.get(product_match) if product_match else None
+                )
+                if matched_product and (
+                    name != product_match or selected_product_id != matched_product.get("id")
+                ):
+                    if name != product_match:
+                        corrections.append(f"producto «{product_match}»")
+                    name = str(matched_product.get("name") or product_match)
+                    selected_product_id = matched_product.get("id")
+
+                brand = str(f_brand.value or "").strip()
+                brand_match = best_match(brand, brand_values)
+                if brand_match and brand_match != brand:
+                    corrections.append(f"marca «{brand_match}»")
+                    brand = brand_match
+
+                subcategory = str(f_sub.value or "").strip()
+                subcategory_match = best_match(subcategory, subcategory_values)
+                if subcategory_match and subcategory_match != subcategory:
+                    corrections.append(f"subcategoría «{subcategory_match}»")
+                    subcategory = subcategory_match
+
+                provider = str(f_prov.value or "").strip()
+                provider_match = best_match(provider, provider_values)
+                if provider_match and provider_match != provider:
+                    corrections.append(f"comercio «{provider_match}»")
+                    provider = provider_match
+
+                if corrections:
+                    ui.notify(
+                        "Se reutilizó: " + ", ".join(corrections) + ".",
+                        type="info",
+                    )
+
                 product_id, created = domain_tx.resolve_product(
                     state.products,
                     state.workspace,
                     name,
                     category_id=f_cat.value,
-                    brand=f_brand.value or "",
+                    brand=brand,
                     unit=f_unit.value or "",
-                    subcategory=f_sub.value or "",
-                    provider=f_prov.value or "",
+                    subcategory=subcategory,
+                    provider=provider,
                     product_id=selected_product_id,
                 )
                 if created is not None:
@@ -472,9 +673,9 @@ def _build(state: AppState) -> None:
                     product_id=product_id,
                     quantity=f_qty.value,
                     unit=f_unit.value or "",
-                    brand=f_brand.value or "",
-                    subcategory=f_sub.value or "",
-                    provider=f_prov.value or "",
+                    brand=brand,
+                    subcategory=subcategory,
+                    provider=provider,
                     payment_method=f_pay.value or "",
                     origin_platform=f_origin.value or "",
                     nature=f_nature.value or "",
