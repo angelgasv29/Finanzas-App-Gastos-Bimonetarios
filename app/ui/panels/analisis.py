@@ -288,12 +288,12 @@ def _tab_prices(state: AppState, txs: list[dict[str, Any]]) -> None:
 
 def _tab_variants(state: AppState, txs: list[dict[str, Any]]) -> None:
     with ui.row().classes("grid grid-cols-2 gap-3 w-full items-end"):
-        group_by = ui.select(GROUP_LABELS, value="unit", label="Agrupar por").classes("w-full")
+        group_by = ui.select(GROUP_LABELS, value="unit", label="Agrupar por").classes("w-full").mark("analysis-variants-group")
         product_filter = ui.select(
             {pid: name for pid, name in _product_options(state, txs).items()},
             value=None,
             label="Filtrar por producto",
-        ).classes("w-full")
+        ).classes("w-full").mark("analysis-variants-product")
     body = ui.column().classes("w-full gap-3")
 
     def recompute() -> None:
@@ -309,12 +309,49 @@ def _tab_variants(state: AppState, txs: list[dict[str, Any]]) -> None:
             if view["empty"]:
                 ui.html(c.empty_html(str(view["empty"])))
                 return
+            label = GROUP_LABELS.get(group_by.value or "unit", "Unidad")
+            c.section_title(f"Variantes · {label}")
             chips = view["chips"]
             ui.html(
                 f'{c.chip_html(f"{chips['variants']} variantes", "brand")}'
                 f'{c.chip_html("Más económica: " + str(chips['bestKey']))}'
                 f'{c.chip_html(str(chips["bestUnit"]))}'
             )
+            if view["points"]:
+                points = view["points"]
+                data = []
+                for row, point in zip(view["rows"], points):
+                    data.append(
+                        {
+                            "name": row["key"],
+                            "value": [point["x"], round(point["y"], 4)],
+                            "symbolSize": round(point["r"] * 2, 2),
+                            "itemStyle": {
+                                "color": point["color"],
+                                "borderColor": point["border"],
+                                "borderWidth": point["width"],
+                            },
+                        }
+                    )
+                ui.echart(
+                    {
+                        "tooltip": {"trigger": "item"},
+                        "grid": {"left": 64, "right": 24, "top": 24, "bottom": 44},
+                        "xAxis": {"type": "value", "name": "Cantidad"},
+                        "yAxis": {
+                            "type": "value",
+                            "name": "USD por unidad",
+                            "scale": True,
+                        },
+                        "series": [
+                            {
+                                "type": "scatter",
+                                "data": data,
+                                "emphasis": {"focus": "series"},
+                            }
+                        ],
+                    }
+                ).classes("w-full h-64")
             c.data_table(
                 ["Grupo", "Compras", "Cantidad", "Total", "Precio unitario", "Peso"],
                 [
@@ -414,8 +451,8 @@ def _tab_pivot(state: AppState, txs: list[dict[str, Any]]) -> None:
 
 def _tab_frequency(state: AppState, txs: list[dict[str, Any]]) -> None:
     with ui.row().classes("grid grid-cols-2 gap-3 w-full items-end"):
-        group_by = ui.select(GROUP_LABELS, value="provider", label="Agrupar por").classes("w-full")
-        order_by = ui.select(ORDER_LABELS, value="total", label="Ordenar por").classes("w-full")
+        group_by = ui.select(GROUP_LABELS, value="provider", label="Agrupar por").classes("w-full").mark("analysis-frequency-group")
+        order_by = ui.select(ORDER_LABELS, value="total", label="Ordenar por").classes("w-full").mark("analysis-frequency-order")
     body = ui.column().classes("w-full gap-3")
 
     def recompute() -> None:
@@ -432,6 +469,12 @@ def _tab_frequency(state: AppState, txs: list[dict[str, Any]]) -> None:
             if view["empty"]:
                 ui.html(c.empty_html(str(view["empty"])))
                 return
+            label = GROUP_LABELS.get(group_by.value or "provider", "Comercio")
+            c.section_title(f"Frecuencia · {label}")
+            if view.get("notice"):
+                ui.html(
+                    f'<div class="muted">{escape_html(str(view["notice"]))}</div>'
+                )
             c.data_table(
                 ["Grupo", "Compras", "Intervalo", "Cant. media", "Ticket medio", "Total", "Última", "Próxima"],
                 [
@@ -540,7 +583,36 @@ def _tab_projection(state: AppState, txs: list[dict[str, Any]]) -> None:
                     f'{c.chip_html("Proyectado " + stats["projUsd"])}'
                     f'{c.chip_html("Variación " + stats["deltaUsd"], "warn")}'
                 )
+                ui.html(
+                    f'{c.chip_html("Actual Bs " + stats["currentBs"])}'
+                    f'{c.chip_html("Proyectado Bs " + stats["projBs"])}'
+                    f'{c.chip_html("Tasa " + stats["rate"])}'
+                )
                 ui.html(f'<div class="muted">{escape_html(view["model"] or "")}</div>')
+                chart = view["chart"]
+                if chart:
+                    ui.echart(
+                        {
+                            "tooltip": {"trigger": "axis"},
+                            "legend": {"top": 0},
+                            "grid": {"left": 62, "right": 16, "top": 32, "bottom": 28},
+                            "xAxis": {"type": "category", "data": chart["labels"]},
+                            "yAxis": {"type": "value", "scale": True},
+                            "series": [
+                                {
+                                    "name": "Real",
+                                    "type": "line",
+                                    "data": chart["actual"],
+                                },
+                                {
+                                    "name": "Proyectada",
+                                    "type": "line",
+                                    "data": chart["projected"],
+                                    "lineStyle": {"type": "dashed"},
+                                },
+                            ],
+                        }
+                    ).classes("w-full h-64")
 
         product.on_value_change(lambda _e=None: recompute())
         horizon.on_value_change(lambda _e=None: recompute())

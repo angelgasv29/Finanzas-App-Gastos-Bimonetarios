@@ -1,11 +1,11 @@
-"""Pruebas del motor de análisis.
+"""Pruebas de la analítica (Fase 5) sin depender de Node.
 
-El verificación (la suite de contraste) ya compara estas mismas funciones contra el
-JavaScript de referencia ejecutándolas con un DOM falso. Aquí se fijan los cálculos
-con valores obtenidos a mano, para que la suite siga teniendo valor sin
+El oráculo (``tests/test_oracle.py``) ya compara estas mismas funciones contra el
+JavaScript original ejecutándolas con un DOM falso. Aquí se fijan los cálculos
+con valores obtenidos a mano, para que la suite siga teniendo valor aunque Node
 no esté instalado.
 
-Los valores esperados se derivan de las fórmulas de la versión de referencia:
+Los valores esperados se derivan de las fórmulas del original:
 
 * Laspeyres → peso = **gasto total** del producto, variación = primera compra
   frente a la última.
@@ -171,6 +171,61 @@ def test_variants_radio_de_burbuja() -> None:
     assert min(point["r"] for point in points) == pytest.approx(expected_small)
 
 
+@pytest.mark.parametrize(
+    ("group_by", "expected_keys"),
+    [
+        ("unit", {"kg", "litro"}),
+        ("brand", {"Marca A", "Marca B"}),
+        ("subcategory", {"Sub A", "Sub B"}),
+        ("provider", {"Comercio A", "Comercio B"}),
+        ("paymentMethod", {"Efectivo Bs", "Zelle"}),
+        ("originPlatform", {"Binance P2P", "Zinli"}),
+        ("category", {"Comida", "Ocio"}),
+        ("product", {"Harina", "Arroz"}),
+    ],
+)
+def test_variantes_y_frecuencia_respetan_todas_las_agrupaciones(
+    group_by: str, expected_keys: set[str]
+) -> None:
+    txs = [
+        tx(
+            date="2026-03-01",
+            unit="kg",
+            brand="Marca A",
+            subcategory="Sub A",
+            provider="Comercio A",
+            paymentMethod="Efectivo Bs",
+            originPlatform="Binance P2P",
+            categoryId="c1",
+            productId="p1",
+            productName="Harina",
+        ),
+        tx(
+            date="2026-03-11",
+            unit="litro",
+            brand="Marca B",
+            subcategory="Sub B",
+            provider="Comercio B",
+            paymentMethod="Zelle",
+            originPlatform="Zinli",
+            categoryId="c2",
+            productId="p2",
+            productName="Arroz",
+            amountUsd=20.0,
+        ),
+    ]
+
+    variant_view = variants.variants_view(
+        txs, CATEGORIES, group_by=group_by, ctx=CTX_USD
+    )
+    frequency_view = frequency.frequency_view(
+        txs, CATEGORIES, group_by=group_by
+    )
+
+    assert {row["key"] for row in variant_view["rows"]} == expected_keys
+    assert {row["key"] for row in frequency_view["rows"]} == expected_keys
+
+
 # ---------------------------------------------------------------------------
 # B · Pivote
 # ---------------------------------------------------------------------------
@@ -250,7 +305,7 @@ def test_frequency_soon_y_orden() -> None:
         tx(provider="B", date="2026-03-10", quantity=1, amountUsd=100.0),
         tx(provider="B", date="2026-03-11", quantity=1, amountUsd=100.0),
     ]
-    # La fecha de "hoy" es la de los casos del verificación.
+    # La fecha de "hoy" es la de los casos del oráculo.
     now = dt.datetime(2026, 3, 15, 12, 0, 0)
     view = frequency.frequency_view(txs, CATEGORIES, now=now)
     keys = [row["key"] for row in view["rows"]]
@@ -260,6 +315,19 @@ def test_frequency_soon_y_orden() -> None:
     assert by_key["A"]["soon"] is True
     assert by_key["A"]["interval"] == "9.0 días"
     assert by_key["B"]["interval"] == "1.0 días"
+
+
+def test_frequency_mismo_dia_no_inventa_intervalo() -> None:
+    txs = [
+        tx(provider="A", date="2026-03-01", amountUsd=5.0),
+        tx(provider="A", date="2026-03-01", amountUsd=6.0),
+    ]
+    view = frequency.frequency_view(txs, CATEGORIES)
+    row = view["rows"][0]
+    assert row["count"] == "2"
+    assert row["interval"] == "Mismo día"
+    assert row["next"] == "—"
+    assert view["notice"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +421,7 @@ def test_product_projection_usa_la_tasa_proyectada() -> None:
 
 
 def test_category_impact_convierte_iva_con_la_tasa_de_cada_compra() -> None:
-    """Bug #1 de la versión de referencia: ``ivaMonto`` viene en Bs y se pasa a USD con la
+    """Bug #1 del original: ``ivaMonto`` viene en Bs y se pasa a USD con la
     tasa **histórica** de la transacción."""
     txs = [
         tx(categoryId="c1", amountUsd=10.0, amountBs=400.0, ivaMonto=16.0, rate=40.0),
@@ -433,7 +501,7 @@ def test_payment_impact_reparto_y_liquido() -> None:
 
 
 def test_liquidity_split_separa_bs_de_divisas() -> None:
-    """El ajuste de ``runAnalysisE`` separa por método y plataforma de origen."""
+    """El parche de ``runAnalysisE`` separa por método y plataforma de origen."""
     txs = [
         tx(paymentMethod="Efectivo Bs", amountUsd=10.0),
         tx(paymentMethod="Pago Móvil", amountUsd=4.0),
@@ -472,7 +540,7 @@ def test_budget_traffic_light_estados_y_orden() -> None:
         ctx=CTX_USD,
     )
     assert view["empty"] is None
-    # El ajuste ya no reordena por estado: las filas siguen el orden de las
+    # El parche ya no reordena por estado: las filas siguen el orden de las
     # categorías y el chip vive dentro de la fila.
     assert [(row["name"], row["state"]) for row in view["rows"]] == [
         ("Comida", "over"),
@@ -554,7 +622,7 @@ def test_sparklines_geometria_y_meses() -> None:
         "2026-03",
     ]
     assert view["series"]["c1"] == [0.0, 0.0, 0.0, 0.0, 5.0, 10.0]
-    # Geometría del ajuste: x = (i/(n-1))·(w−4)+2, y = h−3−(v/max)·(h−6).
+    # Geometría del parche: x = (i/(n-1))·(w−4)+2, y = h−3−(v/max)·(h−6).
     assert view["points"]["c1"][0] == [2.0, 21.0]
     assert view["points"]["c1"][5] == [58.0, 3.0]
     assert view["colors"]["c1"] == "#111111"

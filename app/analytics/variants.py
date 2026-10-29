@@ -1,6 +1,6 @@
 """Sub-pestaña A.2 · Lupa de variantes (``runAnalysisVariants``).
 
-Implementación de la versión **efectiva** (capa de compatibilidad, línea 7935). Agrupa las
+Porteo de la versión **efectiva** (parche maestro, línea 7935). Agrupa las
 compras por unidad, subcategoría o marca y dibuja una burbuja por variante:
 X = volumen comprado, Y = precio unitario medio, radio = inversión.
 
@@ -21,6 +21,7 @@ from ..core.money import (
     js_number_or_zero,
     js_to_fixed,
 )
+from .common import group_key
 
 __all__ = ["variants_view"]
 
@@ -28,7 +29,11 @@ NO_CATEGORY_COLOR = "#6B7280"
 BEST_COLOR = "#10B981"
 
 
-def _group_key(tx: dict[str, Any], group_by: str) -> str:
+def _group_key(
+    tx: dict[str, Any],
+    group_by: str,
+    category_names: dict[str, str] | None = None,
+) -> str:
     """Clave de agrupación.
 
     >>> tx = {"unit": " kg ", "subcategory": "", "brand": ""}
@@ -39,13 +44,7 @@ def _group_key(tx: dict[str, Any], group_by: str) -> str:
     >>> _group_key(tx, "brand")
     '— Sin marca —'
     """
-    if group_by == "unit":
-        value = tx.get("unit") or "unidad"
-    elif group_by == "subcategory":
-        value = tx.get("subcategory") or "— Sin subcat. —"
-    else:
-        value = tx.get("brand") or "— Sin marca —"
-    return str(value).strip()
+    return group_key(tx, group_by, category_names)
 
 
 def variants_view(
@@ -77,15 +76,19 @@ def variants_view(
     if not chart_available:
         return {"empty": None, "chips": {}, "rows": [], "points": []}
 
+    category_names = {
+        category.get("id"): category.get("name") or ""
+        for category in categories
+    }
     filtered = [tx for tx in txs if js_number_or_zero(tx.get("amountUsd")) > 0]
     if product_filter:
         filtered = [tx for tx in filtered if tx.get("productId") == product_filter]
 
     groups: dict[str, dict[str, Any]] = {}
     for tx in filtered:
-        key = _group_key(tx, group_by)
+        key = _group_key(tx, group_by, category_names)
         # ``if (!groups[key])``: una clave vacía se considera *siempre* ausente y
-        # el grupo se recrea (la versión de referencia pierde las compras anteriores).
+        # el grupo se recrea (el original pierde las compras anteriores).
         group = groups.get(key) if key else None
         if group is None:
             group = {
@@ -123,7 +126,7 @@ def variants_view(
         )
 
     rows = [row for row in rows if row["unitUsd"] > 0]
-    # El ajuste ordena por ``unitUsd`` ascendente sin tocar el orden de inserción.
+    # El parche ordena por ``unitUsd`` ascendente sin tocar el orden de inserción.
     rows.sort(key=lambda row: row["unitUsd"])
 
     if not rows:

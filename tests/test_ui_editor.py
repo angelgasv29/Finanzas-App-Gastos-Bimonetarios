@@ -23,13 +23,18 @@ from app.ui.panels import registrar
 from app.ui.state import open_state
 
 
-def _category_with_text_field(state) -> tuple[dict, dict]:
+def _category_with_text_field(state, required: tuple[str, ...] = ()) -> tuple[dict, dict]:
     """La primera categoría con un campo personalizado de texto.
 
     El orden de las categorías sembradas es arbitrario (van ordenadas por su
-    ``id``), así que no se puede asumir que la primera tenga texto.
+    ``id``), así que no se puede asumir que la primera tenga texto. ``required``
+    permite exigir que la categoría tenga habilitados los campos que la prueba
+    va a comprobar (cantidad, unidad, marca…).
     """
     for category in state.categories:
+        enabled = category.get("enabledFields") or {}
+        if not all(enabled.get(field, True) for field in required):
+            continue
         for field in category.get("customFields") or []:
             if field.get("type") == "text":
                 return category, field
@@ -175,7 +180,9 @@ async def _autocompletar(tmp_path: Path) -> None:
         "rates", {"date": "2026-03-15", "value": 40.0, "source": "BCV", "ts": 0}
     )
     state.refresh()
-    category, custom_field = _category_with_text_field(state)
+    category, custom_field = _category_with_text_field(
+        state, ("quantity", "unit", "brand")
+    )
     state.categories.sort(key=lambda item: item.get("id") != category.get("id"))
 
     product = {

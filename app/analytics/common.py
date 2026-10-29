@@ -1,6 +1,6 @@
 """Utilidades compartidas por las sub-pestañas de Análisis.
 
-Implementación de ``getFilteredTx``, del agrupamiento por producto de
+Porteo de ``getFilteredTx`` (líneas 4945-4949), del agrupamiento por producto de
 ``runAnalysisA`` (5020-5023) y de ``buildHist`` (5025-5034).
 """
 
@@ -13,15 +13,73 @@ from ..core.periods import date_to_iso
 from ..core.stats import unit_price
 
 __all__ = [
+    "GROUP_FIELDS",
     "ProductHistory",
     "build_history",
     "by_product",
     "filtered_by_range",
+    "group_key",
     "series_from_history",
     "MS_PER_DAY",
 ]
 
 MS_PER_DAY = 86_400_000
+
+#: Campo de la transacción y texto de respaldo para cada agrupación de Análisis.
+GROUP_FIELDS: dict[str, tuple[str, str]] = {
+    "unit": ("unit", "unidad"),
+    "brand": ("brand", "— Sin marca —"),
+    "subcategory": ("subcategory", "— Sin subcat. —"),
+    "provider": ("provider", "— Sin comercio —"),
+    "paymentMethod": ("paymentMethod", "— Sin forma de pago —"),
+    "originPlatform": ("originPlatform", "— Sin plataforma —"),
+    "category": ("categoryId", "— Sin categoría —"),
+    "product": ("productName", "— Sin producto —"),
+}
+
+
+def group_key(
+    tx: dict[str, Any],
+    group_by: str,
+    category_names: dict[str, str] | None = None,
+    defaults: dict[str, str] | None = None,
+) -> str:
+    """Clave de agrupación para Variantes y Frecuencia.
+
+    Las dos sub-pestañas ofrecen el mismo selector, pero antes cada una tenía su
+    propia lista de tres campos y el resto caía en un valor por defecto. Esta
+    función centraliza las ocho opciones para que el selector no mienta.
+
+    ``defaults`` permite conservar los textos de respaldo que ya usaba cada
+    sub-pestaña; así la ampliación no cambia los casos que el oráculo compara.
+
+    >>> tx = {"brand": "Marca A", "categoryId": "c1", "productName": "Café"}
+    >>> group_key(tx, "brand")
+    'Marca A'
+    >>> group_key(tx, "category", {"c1": "Alimentos"})
+    'Alimentos'
+    >>> group_key(tx, "provider")
+    '— Sin comercio —'
+    >>> group_key(tx, "unit")
+    'unidad'
+    >>> group_key({"unit": "   "}, "unit")
+    ''
+    """
+    if group_by == "category":
+        category_id = tx.get("categoryId")
+        value = (category_names or {}).get(category_id)
+        fallback = (defaults or {}).get("category", "— Sin categoría —")
+    elif group_by == "product":
+        value = tx.get("productName") or tx.get("productId")
+        fallback = (defaults or {}).get("product", "— Sin producto —")
+    else:
+        field, fallback = GROUP_FIELDS.get(group_by, GROUP_FIELDS["brand"])
+        if defaults and group_by in defaults:
+            fallback = defaults[group_by]
+        value = tx.get(field)
+    if value is None or value == "":
+        return fallback
+    return str(value).strip()
 
 
 @dataclass(frozen=True)
@@ -46,7 +104,7 @@ class ProductHistory:
 def by_product(txs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Agrupa por ``productId`` (ignorando los vacíos) y ordena por fecha.
 
-    El orden de inserción del diccionario se conserva: la versión de referencia lo usa para
+    El orden de inserción del diccionario se conserva: el original lo usa para
     recorrer los productos y ese orden afecta a las sumas en coma flotante.
 
     >>> txs = [{"productId": "b", "date": "2026-03-02"},
@@ -74,7 +132,7 @@ def build_history(
 ) -> list[ProductHistory]:
     """Precio unitario de cada compra y variación frente a la anterior.
 
-    Referencia (5025-5034)::
+    Original (5025-5034)::
 
         const up = unitPrice(t); const u = isBs ? up.unitBs : up.unitUsd;
         if (i > 0) { diffAbs = u - prev; diffPct = prev ? (diffAbs/prev)*100 : 0; }
@@ -120,7 +178,7 @@ def series_from_history(
 ) -> list[float | None]:
     """Rellena los huecos con el último precio conocido (``seriesFromHist``).
 
-    Antes de la primera compra el valor es ``None`` (``null`` en la versión de referencia).
+    Antes de la primera compra el valor es ``None`` (``null`` en el original).
 
     >>> h = ProductHistory("2026-01-10", 2.5, 0, 0, 1, "unidad")
     >>> h2 = ProductHistory("2026-03-10", 3.5, 1, 40, 1, "unidad")
@@ -146,7 +204,7 @@ def filtered_by_range(
 ) -> list[dict[str, Any]]:
     """``getFilteredTx``: fechas ISO entre ``start`` y ``end``, ambos incluidos.
 
-    Compara cadenas ISO, igual que la versión de referencia (correcto para ``YYYY-MM-DD``).
+    Compara cadenas ISO, igual que el original (correcto para ``YYYY-MM-DD``).
 
     >>> txs = [{"date": "2026-03-01"}, {"date": "2026-03-31"}, {"date": "2026-04-01"}]
     >>> [t["date"] for t in filtered_by_range(txs, "2026-03-01", "2026-03-31")]

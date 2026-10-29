@@ -377,9 +377,9 @@ Luego, las siete sub-pestañas:
 | Sub-pestaña | Qué responde |
 |---|---|
 | **Precios** | Histórico de precios de un producto, mayores subidas y productos más estables. |
-| **Variantes** | Compara presentaciones (unidad, marca, comercio…): cuál sale más económica por unidad. |
+| **Variantes** | Compara presentaciones por unidad, marca, subcategoría, comercio, forma de pago, plataforma, categoría o producto; muestra cuál sale más económica por unidad, con burbujas de volumen, precio e inversión. |
 | **Pivote** | Cruces por comercio, método de pago, etc., con filtro por producto y opción «solo compras del mismo día». |
-| **Frecuencia** | Cada cuánto compras cada producto y cuánto gastas por período. |
+| **Frecuencia** | Cada cuánto compras según la misma lista de agrupaciones, con intervalo, ticket medio y próxima fecha estimada. Si un grupo solo tiene compras del mismo día, el intervalo aparece como «Mismo día» y no se inventa una próxima fecha. |
 | **Proyecciones** | Proyección de la tasa de cambio y del precio de un producto. |
 | **Categorías** | Impacto por categoría y reparto por método de pago. |
 | **Extras** | Semáforo de presupuesto por categoría, Pareto 80/20, dispersión diaria, árbol categoría → subcategoría → producto y tabla de productos. |
