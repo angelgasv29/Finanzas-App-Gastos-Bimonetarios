@@ -2,8 +2,8 @@
 
 Describe cada tabla para poder generar las consultas de inserción y lectura sin
 repetir la lista de columnas. Las claves son **las mismas que en el JavaScript**
-(``camelCase``), de forma que el resto de esta implementación trabaja con diccionarios
-idénticos a los objetos de la versión de referencia.
+(``camelCase``), de forma que el resto de esta implementación trabaja con
+diccionarios idénticos a los objetos de la versión de referencia.
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ STORE_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "originPlatform",
         "nature",
         "taxMode",
+        "ivaRate",
         "baseImponible",
         "ivaMonto",
         "amountBs",
@@ -139,6 +140,7 @@ FIELD_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "originPlatform": "",
         "nature": "",
         "taxMode": "",
+        "ivaRate": 0.16,
         "baseImponible": 0.0,
         "ivaMonto": 0.0,
         "amountBs": 0.0,

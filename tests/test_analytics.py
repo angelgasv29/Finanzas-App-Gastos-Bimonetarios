@@ -1,11 +1,11 @@
 """Pruebas de la analítica (Fase 5) sin depender de Node.
 
-El oráculo (``tests/test_oracle.py``) ya compara estas mismas funciones contra el
-JavaScript original ejecutándolas con un DOM falso. Aquí se fijan los cálculos
-con valores obtenidos a mano, para que la suite siga teniendo valor aunque Node
-no esté instalado.
+La suite de contraste ya compara estas mismas funciones contra el
+JavaScript de referencia. Aquí se fijan los cálculos con valores obtenidos a
+mano, para que la suite siga teniendo valor sin depender de herramientas
+externas.
 
-Los valores esperados se derivan de las fórmulas del original:
+Los valores esperados se derivan de las fórmulas de referencia:
 
 * Laspeyres → peso = **gasto total** del producto, variación = primera compra
   frente a la última.
@@ -474,6 +474,44 @@ def test_vat_audit() -> None:
     assert view["exentoTotal"] == "Bs. 50,00"
     # 16 / 166 · 100
     assert view["weightedIva"] == "9.64%"
+
+
+def test_vat_audit_rows_muestra_la_tasa_guardada_y_la_deducida() -> None:
+    txs = [
+        tx(
+            date="2026-03-02",
+            productName="Harina",
+            categoryId="c1",
+            ivaMonto=8.0,
+            baseImponible=100.0,
+            amountBs=108.0,
+            taxMode="incluido",
+            ivaRate=0.08,
+        ),
+        tx(
+            date="2026-03-01",
+            productName="Azúcar",
+            categoryId="c1",
+            ivaMonto=16.0,
+            baseImponible=100.0,
+            amountBs=116.0,
+            taxMode="incluido",
+        ),
+    ]
+    view = categories.vat_audit_rows(txs, [{"id": "c1", "name": "Comida"}])
+    assert view["empty"] is None
+    assert [row["date"] for row in view["rows"]] == ["2026-03-01", "2026-03-02"]
+    assert view["rows"][0]["rate"] == "16.00%"
+    assert view["rows"][1]["rate"] == "8.00%"
+    assert view["rows"][1]["category"] == "Comida"
+    assert view["rows"][1]["iva"] == "Bs. 8,00"
+
+
+def test_vat_audit_rows_sin_compras() -> None:
+    assert categories.vat_audit_rows([], []) == {
+        "empty": "Sin compras para auditar en este período.",
+        "rows": [],
+    }
 
 
 def test_vat_audit_sin_gasto() -> None:

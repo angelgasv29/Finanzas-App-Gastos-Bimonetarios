@@ -2,7 +2,7 @@
 
 Todo el cálculo vive en :mod:`app.analytics`; este módulo solo elige el rango
 temporal, recoge los controles y pinta los resultados (tablas y gráficos). Los
-valores provienen de las vistas ya verificadas contra la versión de referencia, así que la
+valores provienen de las vistas ya verificadas contra el original, así que la
 interfaz no reformatea nada: muestra lo que devuelve el motor.
 """
 
@@ -628,6 +628,7 @@ def _tab_categories(state: AppState, txs: list[dict[str, Any]]) -> None:
         decimals=state.decimals,
     )
     audit = analytics_categories.vat_audit(txs)
+    audit_rows = analytics_categories.vat_audit_rows(txs, state.categories)
     payments = analytics_categories.payment_impact(txs, decimals=state.decimals)
 
     with c.card():
@@ -675,6 +676,41 @@ def _tab_categories(state: AppState, txs: list[dict[str, Any]]) -> None:
                         ],
                     }
                 ).classes("w-full h-64")
+
+    with c.card():
+        c.section_title(
+            "Auditoría de IVA por compra",
+            c.chip_html("Tasa guardada en cada movimiento"),
+        )
+        if audit_rows["empty"]:
+            ui.html(c.empty_html(str(audit_rows["empty"])))
+        else:
+            c.data_table(
+                [
+                    "Fecha",
+                    "Producto",
+                    "Categoría",
+                    "Modalidad",
+                    "Base",
+                    "IVA",
+                    "Total",
+                    "Tasa IVA",
+                ],
+                [
+                    (
+                        row["date"],
+                        row["product"],
+                        row["category"],
+                        row["mode"],
+                        row["base"],
+                        row["iva"],
+                        row["total"],
+                        row["rate"],
+                    )
+                    for row in audit_rows["rows"]
+                ],
+                align_right=(4, 5, 6, 7),
+            )
 
     with c.card():
         c.section_title("Reparto por método de pago")

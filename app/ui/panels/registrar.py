@@ -29,15 +29,31 @@ from ..state import AppState
 
 __all__ = ["render"]
 
-VAT_LABELS = {"exento": "Exento", "incluido": "IVA incluido", "mas_iva": "IVA + 16%"}
+VAT_LABELS = {
+    "exento": "Exento",
+    "incluido": "IVA incluido",
+    "mas_iva": "IVA + tasa indicada",
+}
+DEFAULT_VAT_PERCENT = 16.0
+
+
+def _vat_percent(value: Any) -> float:
+    """Convierte la fracción guardada (0,16) en porcentaje para la interfaz."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_VAT_PERCENT
+    if number <= 1:
+        number *= 100
+    return round(max(0.0, min(100.0, number)), 4)
 
 
 def _custom_input(field: dict[str, Any], value: Any = None) -> ui.element:
     """Campo personalizado de una categoría (``customFields``).
 
-    Reproduce los cuatro tipos de la versión de referencia: ``text``, ``number``,
-    ``select`` y ``boolean``. El asterisco marca los obligatorios, igual que el
-    atributo ``required`` del HTML.
+    Reproduce los cuatro tipos del original: ``text``, ``number``, ``select`` y
+    ``boolean``. El asterisco marca los obligatorios, igual que el atributo
+    ``required`` del HTML.
     """
     label = (field.get("label") or "Campo") + (" *" if field.get("required") else "")
     kind = field.get("type") or "text"
@@ -64,7 +80,7 @@ def _custom_input(field: dict[str, Any], value: Any = None) -> ui.element:
 
 
 def _custom_value(field: dict[str, Any], widget: ui.element) -> Any:
-    """Valor tal como lo guardaba la versión de referencia (texto, número como texto, bool)."""
+    """Valor tal como lo guardaba el original (texto, número como texto, bool)."""
     kind = field.get("type") or "text"
     if kind == "boolean":
         return bool(widget.value)
@@ -171,6 +187,12 @@ def _build(state: AppState) -> None:
 
     category_options = {cat["id"]: cat["name"] for cat in state.categories}
     first_category = next(iter(category_options))
+    context = state.register_context if state.register_context.get("keep", True) else {}
+    initial_date = str(context.get("date") or now_date)
+    initial_category = context.get("category_id")
+    if initial_category not in category_options:
+        initial_category = first_category
+    initial_vat = context.get("vat_percent", DEFAULT_VAT_PERCENT)
     products_sorted = sorted(
         state.products, key=lambda item: str(item.get("name") or "").casefold()
     )
@@ -242,10 +264,12 @@ def _build(state: AppState) -> None:
             ).classes("w-full")
 
             with ui.row().classes("grid grid-cols-2 md:grid-cols-4 gap-3 w-full items-end"):
-                f_date = ui.input("Fecha", value=now_date).props("type=date").classes("w-full")
+                with ui.element("div").classes("w-full"):
+                    f_date = ui.input("Fecha", value=initial_date).props("type=date").classes("w-full").mark("reg-date")
+                    date_hint = ui.html("").classes("muted text-xs")
                 f_cat = ui.select(
-                    category_options, value=first_category, label="Categoría"
-                ).classes("w-full")
+                    category_options, value=initial_category, label="Categoría"
+                ).classes("w-full").mark("reg-category")
                 with ui.element("div").classes("w-full") as name_box:
                     f_name = ui.input("Producto").classes("w-full").mark("reg-product")
                     name_suggest = ui.column().classes("w-full gap-1").mark(
@@ -278,8 +302,23 @@ def _build(state: AppState) -> None:
                     list(NATURE_OPTIONS), value="Recurrente", label="Naturaleza"
                 ).classes("w-full")
                 f_mode = ui.select(VAT_LABELS, value="incluido", label="Modalidad IVA").classes("w-full")
+                f_vat_rate = ui.number(
+                    "Tasa IVA (%)",
+                    value=initial_vat,
+                    min=0,
+                    max=100,
+                    step=0.01,
+                    format="%.2f",
+                ).classes("w-full").mark("reg-vat-rate")
                 f_bs = ui.number("Monto Bs", value=0, min=0, format="%.2f").classes("w-full").mark("reg-bs")
                 f_usd = ui.number("Monto USD (opcional)", value=None, min=0, format="%.4f").classes("w-full")
+
+            ui.html(
+                '<div class="muted text-xs">La tasa de IVA se guarda con cada '
+                "compra. 16 % es el valor inicial; cámbialo si la normativa "
+                "aplicable o el ticket indican otra alícuota. Esta herramienta "
+                "no sustituye asesoría fiscal.</div>"
+            ).classes("w-full")
 
             custom_box = ui.column().classes("w-full gap-2")
             custom_inputs: dict[str, ui.element] = {}
@@ -348,9 +387,17 @@ def _build(state: AppState) -> None:
                     return str(product_by_id[value].get("name") or "")
                 return str(value or "").strip()
 
+            def current_vat_rate() -> float:
+                value = f_vat_rate.value
+                return 0.0 if value is None else float(value) / 100
+
             def refresh_preview() -> None:
                 view = vat.vat_preview(
-                    f_bs.value, f_mode.value, state.rate_value, state.money
+                    f_bs.value,
+                    f_mode.value,
+                    state.rate_value,
+                    state.money,
+                    current_vat_rate(),
                 )
                 preview.content = (
                     f'<div class="row wrap" style="gap:8px">'
@@ -358,6 +405,7 @@ def _build(state: AppState) -> None:
                     f'{c.chip_html("IVA " + view["vpIvaBs"])}'
                     f'{c.chip_html("Total " + view["vpTotalBs"], "brand")}'
                     f'{c.chip_html("≈ " + view["vpTotalUsd"])}'
+                    f'{c.chip_html(f"Tasa IVA {float(f_vat_rate.value or 0):.2f}%")}'
                     f"</div>"
                 )
                 name = current_product_name()
@@ -410,6 +458,9 @@ def _build(state: AppState) -> None:
                     f_origin.value = (last or {}).get("originPlatform") or None
                     f_nature.value = (last or {}).get("nature") or "Recurrente"
                     f_mode.value = (last or {}).get("taxMode") or "incluido"
+                    f_vat_rate.value = _vat_percent(
+                        (last or {}).get("ivaRate", DEFAULT_VAT_PERCENT / 100)
+                    )
                     f_qty.value = (last or {}).get("quantity")
                     f_bs.value = 0
                     f_usd.value = None
@@ -539,7 +590,7 @@ def _build(state: AppState) -> None:
                 on_name_change()
                 update_name_suggestions()
 
-            for widget in (f_bs, f_mode, f_qty, f_unit):
+            for widget in (f_bs, f_mode, f_vat_rate, f_qty, f_unit):
                 widget.on_value_change(lambda _e=None: refresh_preview())
             f_name.on_value_change(lambda _e=None: on_name_field_change())
             f_brand.on_value_change(lambda _e=None: update_brand_suggestions())
@@ -556,13 +607,54 @@ def _build(state: AppState) -> None:
                     f_bs.value = round(float(value) * state.rate_value, 2)
                     refresh_preview()
 
-            def reset_form() -> None:
+            def update_date_hint() -> None:
+                today = dt.date.today().isoformat()
+                if f_date.value and str(f_date.value) != today:
+                    date_hint.content = c.chip_html(
+                        f"Fecha fijada: {f_date.value}", "warn"
+                    )
+                else:
+                    date_hint.content = (
+                        '<div class="muted text-xs">Fecha de hoy</div>'
+                    )
+
+            def use_today() -> None:
+                f_date.value = dt.date.today().isoformat()
+                update_date_hint()
+
+            f_date.on_value_change(lambda _e=None: update_date_hint())
+            update_date_hint()
+
+            with ui.row().classes("items-center gap-3 w-full"):
+                sticky_context = ui.checkbox(
+                    "Conservar fecha, categoría y tasa IVA al guardar",
+                    value=bool(state.register_context.get("keep", True)),
+                ).classes("text-sm").mark("reg-keep-context")
+                ui.button("Usar fecha de hoy", on_click=use_today).props(
+                    "flat dense"
+                ).mark("reg-today")
+
+            def reset_form(keep_context: bool = False) -> None:
                 nonlocal selected_product_id
+                kept_date = str(f_date.value or dt.date.today().isoformat())
+                kept_category = f_cat.value or first_category
+                kept_vat = (
+                    f_vat_rate.value
+                    if f_vat_rate.value is not None
+                    else DEFAULT_VAT_PERCENT
+                )
+                if not keep_context:
+                    state.register_context = {"keep": False}
+                    sticky_context.value = False
                 selected_product_id = None
                 guard["product"] = True
                 try:
-                    f_date.value = now_date
-                    f_cat.value = first_category
+                    f_date.value = (
+                        kept_date if keep_context else dt.date.today().isoformat()
+                    )
+                    f_cat.value = (
+                        kept_category if keep_context else first_category
+                    )
                     f_name.value = ""
                     f_qty.value = None
                     f_unit.value = "unidad"
@@ -573,6 +665,9 @@ def _build(state: AppState) -> None:
                     f_origin.value = None
                     f_nature.value = "Recurrente"
                     f_mode.value = "incluido"
+                    f_vat_rate.value = (
+                        kept_vat if keep_context else DEFAULT_VAT_PERCENT
+                    )
                     f_bs.value = 0
                     f_usd.value = None
                 finally:
@@ -586,11 +681,22 @@ def _build(state: AppState) -> None:
                     "reutilizar sus datos.</div>"
                 )
                 apply_category_fields()
+                update_date_hint()
                 refresh_preview()
 
             def save() -> None:
                 nonlocal selected_product_id
                 name = current_product_name()
+                vat_percent = (
+                    DEFAULT_VAT_PERCENT
+                    if f_vat_rate.value is None
+                    else float(f_vat_rate.value)
+                )
+                if not 0 <= vat_percent <= 100:
+                    ui.notify(
+                        "La tasa de IVA debe estar entre 0 y 100 %.", type="warning"
+                    )
+                    return
                 try:
                     domain_tx.validate(f_cat.value, f_date.value, name, f_bs.value)
                     domain_tx.require_rate(rate)
@@ -670,6 +776,7 @@ def _build(state: AppState) -> None:
                     rate=rate,
                     bs_amount=f_bs.value,
                     mode=f_mode.value or "incluido",
+                    iva_rate=vat_percent / 100,
                     product_id=product_id,
                     quantity=f_qty.value,
                     unit=f_unit.value or "",
@@ -682,14 +789,23 @@ def _build(state: AppState) -> None:
                     custom_values=custom_values,
                 )
                 state.repo.add("transactions", record)
+                keep_context = bool(sticky_context.value)
+                if keep_context:
+                    state.register_context = {
+                        "keep": True,
+                        "date": str(f_date.value or dt.date.today().isoformat()),
+                        "category_id": f_cat.value,
+                        "vat_percent": vat_percent,
+                    }
+                else:
+                    state.register_context = {"keep": False}
                 state.refresh()
                 state.notify()
                 ui.notify("Compra registrada.", type="positive")
-                reset_form()
 
             with ui.row().classes("gap-2 mt-2"):
                 ui.button("Guardar compra", on_click=save).props("color=primary unelevated").mark("reg-save")
-                ui.button("Limpiar", on_click=reset_form).props("flat")
+                ui.button("Limpiar", on_click=lambda: reset_form(False)).props("flat")
 
             refresh_preview()
 
@@ -763,22 +879,30 @@ def _build(state: AppState) -> None:
 
 
 def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
-    """Editor de una compra (``openTxEditor``, líneas 4278-4400).
+    """Editor de una compra.
 
-    Edita los mismos campos que el original y reutiliza
-    :func:`app.domain.transactions.apply_edit` para recalcular base, IVA, total y
-    USD. La categoría y el ``productId`` no se tocan (igual que el original).
+    Edita los mismos campos que el original, **incluida la categoría**, y
+    reutiliza :func:`app.domain.transactions.apply_edit` para recalcular base,
+    IVA, total y USD. La tasa de IVA queda guardada con la compra para que el
+    histórico siga siendo auditable si la normativa cambia.
     """
-    category = next(
-        (item for item in state.categories if item.get("id") == tx.get("categoryId")),
-        None,
-    )
-    enabled = (category or {}).get("enabledFields") or {}
+    category_options = {cat["id"]: cat["name"] for cat in state.categories}
+    if not category_options:
+        ui.notify("Crea una categoría antes de editar una compra.", type="warning")
+        return
+    category_by_id = {cat["id"]: cat for cat in state.categories}
+    current_category_id = tx.get("categoryId")
+    if current_category_id not in category_options:
+        current_category_id = None
     today = dt.date.today().isoformat()
 
     with ui.dialog() as dialog, c.card() as box:
-        box.style("max-width: 720px")
+        box.style("max-width: 760px")
         c.section_title(f"Editar compra #{tx.get('id')}")
+        ui.html(
+            '<div class="muted text-xs">Cambiar la categoría solo reclasifica '
+            "esta compra; no borra ni duplica el movimiento.</div>"
+        )
 
         with ui.row().classes("grid grid-cols-1 md:grid-cols-2 gap-3 w-full"):
             e_date = ui.input(
@@ -788,7 +912,13 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
                 "Producto", value=tx.get("productName") or ""
             ).classes("w-full").mark("edit-product")
 
-        with ui.row().classes("grid grid-cols-1 md:grid-cols-2 gap-3 w-full"):
+        e_cat = ui.select(
+            category_options,
+            value=current_category_id,
+            label="Categoría",
+        ).classes("w-full").mark("edit-category")
+
+        with ui.row().classes("grid grid-cols-1 md:grid-cols-3 gap-3 w-full"):
             e_bs = ui.number(
                 "Monto Bs",
                 value=float(tx.get("amountBs") or 0),
@@ -801,13 +931,6 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
                 min=0,
                 format="%.4f",
             ).classes("w-full").mark("edit-usd")
-
-        with ui.row().classes("grid grid-cols-1 md:grid-cols-2 gap-3 w-full"):
-            e_mode = ui.select(
-                VAT_LABELS,
-                value=tx.get("taxMode") or "incluido",
-                label="Modalidad IVA",
-            ).classes("w-full").mark("edit-mode")
             e_rate = ui.number(
                 "Tasa (Bs/$)",
                 value=float(tx.get("rate") or state.rate_value or 0),
@@ -815,59 +938,132 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
                 format="%.4f",
             ).classes("w-full").mark("edit-rate")
 
-        e_qty = (
-            ui.number(
-                "Cantidad", value=tx.get("quantity"), min=0
-            ).classes("w-full")
-            if enabled.get("quantity")
-            else None
-        )
-        e_unit = (
-            ui.input("Unidad", value=tx.get("unit") or "").classes("w-full")
-            if enabled.get("unit")
-            else None
-        )
-        e_brand = (
-            ui.input("Marca", value=tx.get("brand") or "").classes("w-full")
-            if enabled.get("brand")
-            else None
-        )
-        e_provider = (
-            ui.input("Comercio", value=tx.get("provider") or "").classes("w-full")
-            if enabled.get("provider")
-            else None
-        )
-        e_origin = (
-            ui.select(
-                {origin: origin for origin in PAYMENT_ORIGINS},
-                value=tx.get("originPlatform") or None,
-                label="Plataforma origen",
-                clearable=True,
-            ).classes("w-full")
-            if enabled.get("originPlatform")
-            else None
-        )
+        with ui.row().classes("grid grid-cols-1 md:grid-cols-2 gap-3 w-full"):
+            e_mode = ui.select(
+                VAT_LABELS,
+                value=tx.get("taxMode") or "incluido",
+                label="Modalidad IVA",
+            ).classes("w-full").mark("edit-mode")
+            e_vat_rate = ui.number(
+                "Tasa IVA (%)",
+                value=_vat_percent(tx.get("ivaRate", DEFAULT_VAT_PERCENT / 100)),
+                min=0,
+                max=100,
+                step=0.01,
+                format="%.2f",
+            ).classes("w-full").mark("edit-vat-rate")
+
+        with ui.row().classes("grid grid-cols-1 md:grid-cols-3 gap-3 w-full"):
+            with ui.element("div").classes("w-full") as qty_box:
+                e_qty = ui.number(
+                    "Cantidad", value=tx.get("quantity"), min=0
+                ).classes("w-full")
+            with ui.element("div").classes("w-full") as unit_box:
+                e_unit = ui.input("Unidad", value=tx.get("unit") or "").classes(
+                    "w-full"
+                )
+            with ui.element("div").classes("w-full") as brand_box:
+                e_brand = ui.input("Marca", value=tx.get("brand") or "").classes(
+                    "w-full"
+                )
+
+        with ui.row().classes("grid grid-cols-1 md:grid-cols-3 gap-3 w-full"):
+            with ui.element("div").classes("w-full") as sub_box:
+                e_sub = ui.input(
+                    "Subcategoría", value=tx.get("subcategory") or ""
+                ).classes("w-full")
+            with ui.element("div").classes("w-full") as provider_box:
+                e_provider = ui.input(
+                    "Comercio", value=tx.get("provider") or ""
+                ).classes("w-full")
+            with ui.element("div").classes("w-full") as pay_box:
+                e_pay = ui.select(
+                    list(PAYMENT_METHODS),
+                    value=tx.get("paymentMethod") or None,
+                    label="Forma de pago",
+                    clearable=True,
+                ).classes("w-full")
+
+        with ui.row().classes("grid grid-cols-1 md:grid-cols-2 gap-3 w-full"):
+            with ui.element("div").classes("w-full") as origin_box:
+                e_origin = ui.select(
+                    list(PAYMENT_ORIGINS),
+                    value=tx.get("originPlatform") or None,
+                    label="Plataforma origen",
+                    clearable=True,
+                ).classes("w-full")
+            with ui.element("div").classes("w-full") as nature_box:
+                e_nature = ui.select(
+                    list(NATURE_OPTIONS),
+                    value=tx.get("nature") or None,
+                    label="Naturaleza",
+                    clearable=True,
+                ).classes("w-full")
 
         e_notes = ui.textarea(
             "Notas", value=tx.get("notes") or ""
         ).classes("w-full")
 
-        custom_fields = (category or {}).get("customFields") or []
+        custom_box = ui.column().classes("w-full gap-2")
         edit_custom: dict[str, ui.element] = {}
-        if custom_fields:
-            ui.html('<div class="sec-title">Campos personalizados</div>')
-            with ui.row().classes("grid grid-cols-1 md:grid-cols-3 gap-3 w-full"):
-                stored_values = tx.get("customValues") or {}
-                for field in custom_fields:
-                    edit_custom[field.get("id")] = _custom_input(
-                        field, stored_values.get(field.get("id"))
-                    )
+        stored_custom = dict(tx.get("customValues") or {})
+
+        def render_custom_fields() -> None:
+            custom_box.clear()
+            edit_custom.clear()
+            category = category_by_id.get(e_cat.value) or {}
+            fields = category.get("customFields") or []
+            if not fields:
+                return
+            with custom_box:
+                ui.html('<div class="sec-title">Campos personalizados</div>')
+                ui.html(
+                    '<div class="muted text-xs">Pertenecen a la categoría '
+                    "elegida; si la cambias, se muestran los de la nueva.</div>"
+                )
+                with ui.row().classes(
+                    "grid grid-cols-1 md:grid-cols-3 gap-3 w-full"
+                ):
+                    for field in fields:
+                        edit_custom[field.get("id")] = _custom_input(
+                            field, stored_custom.get(field.get("id"))
+                        )
+
+        field_boxes = {
+            "quantity": (qty_box, e_qty),
+            "unit": (unit_box, e_unit),
+            "brand": (brand_box, e_brand),
+            "subcategory": (sub_box, e_sub),
+            "provider": (provider_box, e_provider),
+            "paymentMethod": (pay_box, e_pay),
+            "originPlatform": (origin_box, e_origin),
+            "nature": (nature_box, e_nature),
+        }
+
+        def apply_category_fields() -> None:
+            category = category_by_id.get(e_cat.value) or {}
+            enabled = category.get("enabledFields") or {}
+            for _key, (container, _widget) in field_boxes.items():
+                container.set_visibility(bool(enabled.get(_key, True)))
+            render_custom_fields()
+
+        e_cat.on_value_change(lambda _e=None: apply_category_fields())
+        apply_category_fields()
 
         preview = ui.html("").classes("muted")
 
         def show_preview() -> None:
+            vat_percent = (
+                DEFAULT_VAT_PERCENT
+                if e_vat_rate.value is None
+                else float(e_vat_rate.value)
+            )
             view = vat.vat_preview(
-                e_bs.value, e_mode.value or "incluido", e_rate.value, state.money
+                e_bs.value,
+                e_mode.value or "incluido",
+                e_rate.value,
+                state.money,
+                vat_percent / 100,
             )
             preview.content = (
                 '<div class="row wrap" style="gap:8px">'
@@ -875,6 +1071,7 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
                 + c.chip_html("IVA " + view["vpIvaBs"])
                 + c.chip_html("Total " + view["vpTotalBs"], "brand")
                 + c.chip_html("≈ " + view["vpTotalUsd"])
+                + c.chip_html(f"Tasa IVA {vat_percent:.2f}%")
                 + "</div>"
             )
 
@@ -901,6 +1098,7 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
         e_usd.on_value_change(lambda _e=None: recalc("usd"))
         e_rate.on_value_change(lambda _e=None: recalc("rate"))
         e_mode.on_value_change(lambda _e=None: show_preview())
+        e_vat_rate.on_value_change(lambda _e=None: show_preview())
         show_preview()
 
         def save() -> None:
@@ -908,6 +1106,18 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
             if not name or not e_bs.value or float(e_bs.value) <= 0:
                 ui.notify("Completa el producto y el monto.", type="warning")
                 return
+            vat_percent = (
+                DEFAULT_VAT_PERCENT
+                if e_vat_rate.value is None
+                else float(e_vat_rate.value)
+            )
+            if not 0 <= vat_percent <= 100:
+                ui.notify(
+                    "La tasa de IVA debe estar entre 0 y 100 %.", type="warning"
+                )
+                return
+            category = category_by_id.get(e_cat.value) or {}
+            custom_fields = category.get("customFields") or []
             updated = domain_tx.apply_edit(
                 tx,
                 date=e_date.value or tx.get("date") or today,
@@ -916,19 +1126,16 @@ def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
                 usd_amount=e_usd.value,
                 mode=e_mode.value or "incluido",
                 rate_value=e_rate.value,
-                quantity=(
-                    e_qty.value if e_qty is not None else tx.get("quantity")
-                ),
-                unit=e_unit.value if e_unit is not None else tx.get("unit"),
-                brand=e_brand.value if e_brand is not None else tx.get("brand"),
-                provider=(
-                    e_provider.value if e_provider is not None else tx.get("provider")
-                ),
-                origin_platform=(
-                    e_origin.value
-                    if e_origin is not None
-                    else tx.get("originPlatform")
-                ),
+                iva_rate=vat_percent / 100,
+                category_id=e_cat.value,
+                quantity=e_qty.value,
+                unit=e_unit.value,
+                brand=e_brand.value,
+                subcategory=e_sub.value,
+                provider=e_provider.value,
+                payment_method=e_pay.value or "",
+                origin_platform=e_origin.value or "",
+                nature=e_nature.value or "",
                 notes=e_notes.value or "",
                 custom_values={
                     field["id"]: _custom_value(field, edit_custom[field["id"]])

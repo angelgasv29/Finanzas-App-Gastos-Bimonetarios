@@ -3,7 +3,7 @@
 Tres bloques:
 
 1. **Impacto por categoría**: gasto, IVA convertido a USD con la tasa histórica
-   de cada compra (Bug #1 corregido en la versión de referencia) e inflación extra estimada.
+   de cada compra (Bug #1 corregido en el original) e inflación extra estimada.
 2. **Auditoría de IVA**: acumulado, base imponible, gravadas y exentas.
 3. **Formas de pago**: reparto por método y líquido (efectivo frente a banco).
 """
@@ -15,14 +15,26 @@ from typing import Any
 from ..core.money import format_bs, format_usd, js_number_or_zero, js_round, js_to_fixed
 from ..core.stats import unit_price
 
-__all__ = ["category_impact", "vat_audit", "payment_impact", "liquidity_split"]
+__all__ = [
+    "category_impact",
+    "vat_audit",
+    "vat_audit_rows",
+    "payment_impact",
+    "liquidity_split",
+]
 
 NO_CATEGORY = "Sin categoría"
 NO_CATEGORY_COLOR = "#6B7280"
 NO_PAYMENT = "No especificado"
 CASH_METHODS = ("Efectivo Bs", "Efectivo USD")
 
-# Conjuntos del ajuste de ``runAnalysisE``.
+VAT_MODE_LABELS = {
+    "exento": "Exento",
+    "incluido": "IVA incluido",
+    "mas_iva": "IVA + tasa",
+}
+
+# Conjuntos del parche de ``runAnalysisE`` (línea 7825).
 USD_PAYMENT_METHODS = frozenset({"Efectivo USD", "Zelle", "Billetera Digital/Cripto"})
 USD_ORIGIN_PLATFORMS = frozenset(
     {"Binance P2P", "Zinli", "Efectivo USD", "Wally", "PayPal", "Zelle"}
@@ -30,11 +42,11 @@ USD_ORIGIN_PLATFORMS = frozenset(
 
 
 def liquidity_split(txs: list[dict[str, Any]]) -> dict[str, float]:
-    """Reparto real del gasto entre bolívares y divisas (ajuste de ``runAnalysisE``).
+    """Reparto real del gasto entre bolívares y divisas (parche de ``runAnalysisE``).
 
-    La versión de referencia sustituye el gráfico de liquidez por uno que separa lo pagado en
+    El original sustituye el gráfico de liquidez por uno que separa lo pagado en
     Bs de lo pagado en divisas, mirando el **método de pago** y la **plataforma
-    de origen**:
+    de origen** (línea 7825):
 
     >>> txs = [
     ...   {"paymentMethod": "Efectivo USD", "amountUsd": 10},
@@ -212,6 +224,72 @@ def vat_audit(txs: list[dict[str, Any]]) -> dict[str, Any]:
         "weightedIva": (
             js_to_fixed((iva_total / total_bs) * 100, 2) + "%" if total_bs else "0%"
         ),
+    }
+
+
+def _effective_vat_rate(tx: dict[str, Any]) -> float | None:
+    """Alícuota de la compra: la guardada o, si es histórica, la deducida.
+
+    Las compras anteriores a la columna ``ivaRate`` no tienen el dato. En ese
+    caso se deduce de ``ivaMonto / baseImponible`` para no inventar un 16 %.
+    En una compra exenta no hay alícuota aplicada y se devuelve ``None``.
+    """
+    if tx.get("taxMode") == "exento":
+        return None
+    stored = tx.get("ivaRate")
+    if stored is not None:
+        try:
+            value = float(stored)
+        except (TypeError, ValueError):
+            return None
+        return value
+    base = js_number_or_zero(tx.get("baseImponible"))
+    iva = js_number_or_zero(tx.get("ivaMonto"))
+    if base > 0:
+        return iva / base
+    return None
+
+
+def vat_audit_rows(
+    txs: list[dict[str, Any]], categories: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Detalle por compra para auditar el IVA.
+
+    Devuelve una fila por transacción con fecha, producto, categoría, modalidad,
+    base, cuota, total y alícuota aplicada. La alícuota se muestra como
+    porcentaje y queda vacía cuando la compra es exenta o no tiene base.
+
+    >>> txs = [{"date": "2026-01-02", "productName": "Harina",
+    ...         "categoryId": "c1", "taxMode": "incluido", "ivaRate": 0.16,
+    ...         "baseImponible": 100, "ivaMonto": 16, "amountBs": 116}]
+    >>> view = vat_audit_rows(txs, [{"id": "c1", "name": "Comida"}])
+    >>> view["rows"][0]["rate"], view["rows"][0]["iva"]
+    ('16.00%', 'Bs. 16,00')
+    """
+    category_map = {category.get("id"): category for category in categories}
+    rows: list[dict[str, Any]] = []
+    for tx in sorted(txs, key=lambda item: str(item.get("date") or "")):
+        category = category_map.get(tx.get("categoryId")) or {}
+        rate = _effective_vat_rate(tx)
+        rows.append(
+            {
+                "date": tx.get("date") or "—",
+                "product": tx.get("productName") or "—",
+                "category": category.get("name") or NO_CATEGORY,
+                "mode": VAT_MODE_LABELS.get(
+                    str(tx.get("taxMode") or ""), str(tx.get("taxMode") or "—")
+                ),
+                "base": format_bs(js_number_or_zero(tx.get("baseImponible"))),
+                "iva": format_bs(js_number_or_zero(tx.get("ivaMonto"))),
+                "total": format_bs(js_number_or_zero(tx.get("amountBs"))),
+                "rate": (
+                    js_to_fixed(rate * 100, 2) + "%" if rate is not None else "—"
+                ),
+            }
+        )
+    return {
+        "empty": None if rows else "Sin compras para auditar en este período.",
+        "rows": rows,
     }
 
 

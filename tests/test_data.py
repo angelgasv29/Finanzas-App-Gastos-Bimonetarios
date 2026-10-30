@@ -1,6 +1,6 @@
 """Pruebas de la capa de datos (``app/data``).
 
-Verifican que el repositorio replica la API del objeto ``DB`` de la versión de referencia
+Verifican que el repositorio replica la API del objeto ``DB`` del original
 exactamente donde importa: claves, orden de resultados, semántica de índices y
 tratamiento de valores especiales.
 """
@@ -8,13 +8,14 @@ tratamiento de valores especiales.
 from __future__ import annotations
 
 import itertools
+import sqlite3
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from app.core.constants import CAT_COLORS
-from app.data.db import Database
+from app.data.db import Database, SCHEMA_PATH
 from app.data.repo import Repository
 from app.data.seed import seed_categories_if_empty
 
@@ -29,6 +30,41 @@ def db(db_path: Path) -> Database:
     database = Database(db_path).initialize()
     yield database
     database.close()
+
+
+def test_migra_iva_rate_en_una_base_anterior(db_path: Path) -> None:
+    """Una base sin la columna ``ivaRate`` se actualiza sin perder datos."""
+    old_schema = SCHEMA_PATH.read_text(encoding="utf-8").replace(
+        "    ivaRate        REAL    NOT NULL DEFAULT 0.16, -- fracción: 0.16 = 16 %\n",
+        "",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(old_schema)
+        conn.execute(
+            "INSERT INTO transactions (workspace, year, date, productName, amountBs) "
+            "VALUES ('personal', 2026, '2026-01-01', 'Harina', 116)"
+        )
+        conn.execute(
+            "INSERT INTO transactions "
+            "(workspace, year, date, productName, taxMode, baseImponible, "
+            "ivaMonto, amountBs) VALUES "
+            "('personal', 2026, '2026-01-02', 'Arroz', 'incluido', 100, 8, 108)"
+        )
+        conn.commit()
+
+    database = Database(db_path).initialize()
+    columns = {
+        row["name"] for row in database.connection.execute("PRAGMA table_info(transactions)")
+    }
+    rows = database.connection.execute(
+        "SELECT productName, ivaRate FROM transactions ORDER BY productName"
+    ).fetchall()
+    database.close()
+
+    by_name = {row["productName"]: row["ivaRate"] for row in rows}
+    assert "ivaRate" in columns
+    assert by_name["Harina"] == 0.16
+    assert by_name["Arroz"] == 0.08
 
 
 @pytest.fixture()
@@ -154,8 +190,8 @@ def test_put_actualiza_si_la_clave_existe(repo: Repository) -> None:
 
 def test_put_reemplaza_el_registro_entero_como_indexeddb(repo: Repository) -> None:
     # IndexedDB.put sustituye el registro completo: una propiedad ausente vuelve
-    # a su valor por defecto, no se conserva. La versión de referencia nunca guarda registros
-    # parciales, así que esta implementación tampoco debe poder hacerlo por descuido.
+    # a su valor por defecto, no se conserva. El original nunca guarda registros
+    # parciales, así que el port tampoco debe poder hacerlo por descuido.
     repo.put("categories", make_category())
     repo.put("categories", {"id": "cat_1", "workspace": "personal", "name": "Otra"})
     loaded = repo.get("categories", "cat_1")
@@ -307,7 +343,7 @@ def test_nan_se_guarda_como_null(repo: Repository) -> None:
 
 
 def test_la_cantidad_no_numerica_queda_en_null(repo: Repository) -> None:
-    # La versión de referencia hace parseFloat(...) y guarda undefined/null si no hay número.
+    # El original hace parseFloat(...) y guarda undefined/null si no hay número.
     tx_id = repo.add("transactions", make_transaction(quantity=None))
     assert repo.get("transactions", tx_id)["quantity"] is None
 
@@ -452,7 +488,7 @@ def test_config_guardar_leer_y_borrar(repo: Repository) -> None:
 
 
 def test_config_guarda_todo_como_texto_igual_que_lsSet(repo: Repository) -> None:
-    # La versión de referencia hace localStorage.setItem(k, String(v)).
+    # El original hace localStorage.setItem(k, String(v)).
     repo.set_config("gb_fiscal_year", 2026)
     assert repo.get_config("gb_fiscal_year") == "2026"
 

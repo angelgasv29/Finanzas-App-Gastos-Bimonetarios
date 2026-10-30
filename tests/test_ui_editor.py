@@ -14,6 +14,7 @@ El primer caso verifica que el registro se recalcula con la misma lógica del mo
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 from pathlib import Path
 
 from nicegui.testing.user_simulation import user_simulation
@@ -92,6 +93,58 @@ async def _editar(tmp_path: Path) -> None:
     assert updated["categoryId"] == category["id"]
     assert updated["createdAt"] == 1
     assert updated["customValues"][custom_field["id"]] == "1 kg"
+
+
+def test_el_editor_permite_cambiar_categoria_y_tasa_iva(tmp_path: Path) -> None:
+    asyncio.run(_editar_categoria_y_iva(tmp_path))
+
+
+async def _editar_categoria_y_iva(tmp_path: Path) -> None:
+    state = open_state(tmp_path / "app.sqlite3")
+    state.repo.put(
+        "rates", {"date": "2026-03-15", "value": 40.0, "source": "BCV", "ts": 0}
+    )
+    state.refresh()
+    original_category = state.categories[0]
+    target_category = state.categories[1]
+
+    tx_id = state.repo.add(
+        "transactions",
+        domain_tx.build_transaction(
+            workspace="personal",
+            date="2026-03-15",
+            category_id=original_category["id"],
+            product_name="Harina",
+            rate=state.active_rate,
+            bs_amount=116,
+            mode="incluido",
+            timestamp=1,
+        ),
+    )
+    tx = state.repo.get("transactions", tx_id)
+
+    def root() -> None:
+        registrar._open_editor(state, tx)
+
+    async with user_simulation(root=root) as user:
+        await user.open("/")
+        await user.should_see("Editar compra")
+        category_select = next(iter(user.find(marker="edit-category").elements))
+        with user.client:
+            category_select.value = target_category["id"]
+        user.find(marker="edit-vat-rate").clear().type("8")
+        user.find(marker="edit-bs").clear().type("108")
+        user.find(marker="edit-save").click()
+        await asyncio.sleep(0.1)
+
+    updated = state.repo.get("transactions", tx_id)
+    state.close()
+
+    assert updated["categoryId"] == target_category["id"]
+    assert updated["ivaRate"] == 0.08
+    assert updated["baseImponible"] == 100.0
+    assert updated["ivaMonto"] == 8.0
+    assert updated["amountBs"] == 108.0
 
 
 def test_el_formulario_guarda_campos_personalizados(tmp_path: Path) -> None:
@@ -255,6 +308,103 @@ async def _autocompletar(tmp_path: Path) -> None:
     assert latest["originPlatform"] == "Binance P2P"
     assert latest["customValues"][custom_field["id"]] == "Paquete 500 g"
     assert len(state.products) == 1
+
+
+def test_el_formulario_conserva_fecha_categoria_y_iva(tmp_path: Path) -> None:
+    asyncio.run(_conservar_contexto(tmp_path))
+
+
+async def _conservar_contexto(tmp_path: Path) -> None:
+    state = open_state(tmp_path / "app.sqlite3")
+    state.repo.put(
+        "rates", {"date": "2026-03-15", "value": 40.0, "source": "BCV", "ts": 0}
+    )
+    state.refresh()
+    category = state.categories[1]
+
+    def root() -> None:
+        registrar.render(state)
+
+    async with user_simulation(root=root) as user:
+        await user.open("/")
+        await user.should_see("Registrar compra")
+        date_input = next(iter(user.find(marker="reg-date").elements))
+        category_select = next(iter(user.find(marker="reg-category").elements))
+        with user.client:
+            date_input.set_value("2026-03-01")
+            category_select.set_value(category["id"])
+        user.find(marker="reg-vat-rate").clear().type("8")
+        await user.should_see("Fecha fijada")
+        user.find(marker="reg-product").type("Café")
+        user.find(marker="reg-bs").clear().type("108")
+        user.find(marker="reg-save").click()
+        await asyncio.sleep(0.1)
+
+        # Tras guardar, los tres datos de contexto siguen puestos.
+        assert next(iter(user.find(marker="reg-date").elements)).value == "2026-03-01"
+        assert (
+            next(iter(user.find(marker="reg-category").elements)).value
+            == category["id"]
+        )
+        assert float(
+            next(iter(user.find(marker="reg-vat-rate").elements)).value
+        ) == 8.0
+
+        user.find(marker="reg-product").type("Azúcar")
+        user.find(marker="reg-bs").clear().type("54")
+        user.find(marker="reg-save").click()
+        await asyncio.sleep(0.1)
+
+    txs = sorted(state.transactions(), key=lambda tx: tx.get("id") or 0)
+    state.close()
+
+    assert len(txs) == 2
+    for tx in txs:
+        assert tx["date"] == "2026-03-01"
+        assert tx["categoryId"] == category["id"]
+        assert tx["ivaRate"] == 0.08
+
+
+def test_el_formulario_puede_no_conservar_el_contexto(tmp_path: Path) -> None:
+    asyncio.run(_no_conservar_contexto(tmp_path))
+
+
+async def _no_conservar_contexto(tmp_path: Path) -> None:
+    state = open_state(tmp_path / "app.sqlite3")
+    state.repo.put(
+        "rates", {"date": "2026-03-15", "value": 40.0, "source": "BCV", "ts": 0}
+    )
+    state.refresh()
+
+    def root() -> None:
+        registrar.render(state)
+
+    async with user_simulation(root=root) as user:
+        await user.open("/")
+        await user.should_see("Registrar compra")
+        date_input = next(iter(user.find(marker="reg-date").elements))
+        category_select = next(iter(user.find(marker="reg-category").elements))
+        with user.client:
+            date_input.set_value("2026-03-01")
+            category_select.set_value(state.categories[1]["id"])
+        user.find(marker="reg-vat-rate").clear().type("8")
+        user.find(marker="reg-keep-context").click()
+        user.find(marker="reg-product").type("Café")
+        user.find(marker="reg-bs").clear().type("108")
+        user.find(marker="reg-save").click()
+        await asyncio.sleep(0.1)
+
+        assert (
+            next(iter(user.find(marker="reg-date").elements)).value
+            == dt.date.today().isoformat()
+        )
+        assert (
+            next(iter(user.find(marker="reg-category").elements)).value
+            == state.categories[0]["id"]
+        )
+        assert not next(iter(user.find(marker="reg-keep-context").elements)).value
+
+    state.close()
 
 
 async def _registrar(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 """IVA: los tres modos del formulario de registro.
 
-Implementación del bloque de cálculo que la versión de referencia **repite** cuatro veces con el mismo
+Porteo del bloque de cálculo que el original **repite** cuatro veces con el mismo
 código (líneas 3938-3941 al guardar, 3823-3826 en la vista previa, 4368-4371 al
 editar y 3249-3250 en el desglose):
 
@@ -17,13 +17,14 @@ Tres detalles que se respetan a propósito:
 2. En ``incluido`` la base se deriva del total, así que ``iva`` es una
    **resta**, no una multiplicación: el redondeo no es el mismo.
 3. El editor de transacciones usa los literales ``1.16`` y ``0.16`` en lugar de
-   ``1 + IVA_RATE`` y ``IVA_RATE``. Se comprobó en el motor de la versión de referencia que
+   ``1 + IVA_RATE`` y ``IVA_RATE``. Se comprobó en el motor del original que
    ``1 + 0.16 === 1.16`` como *double* IEEE754, así que ambas formas son
    idénticas y aquí se usa siempre :data:`~app.core.constants.IVA_RATE`.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,14 +34,49 @@ from ..core.money import (
     format_bs,
     format_usd,
     js_number_or_zero,
+    js_parse_float,
     js_parse_float_or_zero,
     js_round,
 )
 
-__all__ = ["VatAmounts", "compute_vat", "DEFAULT_VAT_MODE", "vat_preview"]
+__all__ = [
+    "VatAmounts",
+    "compute_vat",
+    "normalize_vat_rate",
+    "DEFAULT_VAT_MODE",
+    "vat_preview",
+]
 
 # ``getVatMode`` devuelve 'incluido' si no hay ninguna opción marcada.
 DEFAULT_VAT_MODE = "incluido"
+
+
+def normalize_vat_rate(rate: Any = None) -> float:
+    """Devuelve la alícuota como fracción (0,16 = 16 %).
+
+    El valor se guarda con cada compra para que el histórico siga siendo
+    auditable aunque la ley cambie. Si el campo viene vacío, no es numérico o es
+    negativo, se usa la alícuota histórica del 16 %. El valor 0 sí es válido: una
+    compra puede estar gravada al 0 % sin estar formalmente exenta.
+
+    >>> normalize_vat_rate(None)
+    0.16
+    >>> normalize_vat_rate("0,08")   # formato local
+    0.08
+    >>> normalize_vat_rate(8)        # se interpreta como porcentaje
+    0.08
+    >>> normalize_vat_rate(-1)
+    0.16
+    """
+    if rate is None or rate == "":
+        return IVA_RATE
+    parsed = js_parse_float(str(rate).replace(",", "."))
+    if math.isnan(parsed) or parsed < 0:
+        return IVA_RATE
+    # La interfaz trabaja en porcentaje (16), pero el dominio y la base guardan
+    # la fracción (0.16). Valores > 1 se interpretan como porcentaje para que
+    # una llamada desde un script no multiplique por 16 sin avisar.
+    return parsed / 100 if parsed > 1 else parsed
 
 
 @dataclass(frozen=True)
@@ -56,11 +92,17 @@ class VatAmounts:
     total: float
 
 
-def compute_vat(bs: Any, mode: str = DEFAULT_VAT_MODE) -> VatAmounts:
+def compute_vat(
+    bs: Any,
+    mode: str = DEFAULT_VAT_MODE,
+    iva_rate: Any = IVA_RATE,
+) -> VatAmounts:
     """Desglose del IVA de un monto en bolívares.
 
     :param bs: monto tecleado en el formulario (en Bs).
     :param mode: ``'exento'``, ``'incluido'`` o cualquier otra cosa (``'mas_iva'``).
+    :param iva_rate: alícuota como fracción (0,16 = 16 %). Se guarda con la
+        compra para poder auditar el histórico si la ley cambia.
 
     >>> compute_vat(116, "exento")
     VatAmounts(base=116.0, iva=0, total=116.0)
@@ -70,20 +112,25 @@ def compute_vat(bs: Any, mode: str = DEFAULT_VAT_MODE) -> VatAmounts:
     116.0
     >>> compute_vat(100, "lo-que-sea").total   # el else es 'mas_iva'
     116.0
+    >>> compute_vat(100, "mas_iva", 0.08).total
+    108.0
     """
     amount = js_parse_float_or_zero(bs)  # parseFloat(...) || 0
+    rate = normalize_vat_rate(iva_rate)
 
     if mode == "exento":
         return VatAmounts(base=amount, iva=0, total=amount)
     if mode == "incluido":
-        base = amount / (1 + IVA_RATE)
+        base = amount / (1 + rate)
         return VatAmounts(base=base, iva=amount - base, total=amount)
-    iva = amount * IVA_RATE
+    iva = amount * rate
     return VatAmounts(base=amount, iva=iva, total=amount + iva)
 
 
-def rounded_vat(bs: Any, mode: str = DEFAULT_VAT_MODE) -> VatAmounts:
-    """Desglose con el redondeo que aplica ``saveTransaction``.
+def rounded_vat(
+    bs: Any, mode: str = DEFAULT_VAT_MODE, iva_rate: Any = IVA_RATE
+) -> VatAmounts:
+    """Desglose con el redondeo que aplica ``saveTransaction`` (líneas 3979-3980).
 
     >>> rounded_vat(116, "incluido")
     VatAmounts(base=100.0, iva=16.0, total=116.0)
@@ -91,8 +138,10 @@ def rounded_vat(bs: Any, mode: str = DEFAULT_VAT_MODE) -> VatAmounts:
     VatAmounts(base=100.0, iva=16.0, total=116.0)
     >>> rounded_vat(100.05, "incluido").base
     86.25
+    >>> rounded_vat(100, "mas_iva", 0.08).iva
+    8.0
     """
-    amounts = compute_vat(bs, mode)
+    amounts = compute_vat(bs, mode, iva_rate)
     return VatAmounts(
         base=js_round(amounts.base, 2),
         iva=js_round(amounts.iva, 2),
@@ -101,17 +150,23 @@ def rounded_vat(bs: Any, mode: str = DEFAULT_VAT_MODE) -> VatAmounts:
 
 
 def vat_preview(
-    bs: Any, mode: str, rate_value: Any, ctx: MoneyContext
+    bs: Any,
+    mode: str,
+    rate_value: Any,
+    ctx: MoneyContext,
+    iva_rate: Any = IVA_RATE,
 ) -> dict[str, str]:
     """Vista previa del IVA (``updateVatPreview``, líneas 3818-3832).
 
-    Devuelve lo que la versión de referencia escribe en cuatro nodos del formulario.
+    Devuelve lo que el original escribe en cuatro nodos del formulario.
 
     >>> ctx = MoneyContext("VES", 2, 40.0)
     >>> vat_preview(116, "incluido", 40.0, ctx)
     {'vpBaseBs': 'Bs. 100,00', 'vpIvaBs': 'Bs. 16,00', 'vpTotalBs': 'Bs. 116,00', 'vpTotalUsd': '$ 2.90'}
+    >>> vat_preview(100, "mas_iva", 40.0, ctx, 0.08)["vpTotalBs"]
+    'Bs. 108,00'
     """
-    amounts = compute_vat(bs, mode)
+    amounts = compute_vat(bs, mode, iva_rate)
     rate = js_number_or_zero(rate_value) if rate_value else 0.0
     return {
         "vpBaseBs": format_bs(amounts.base),

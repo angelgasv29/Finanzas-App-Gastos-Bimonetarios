@@ -6,7 +6,7 @@ puede pegar el texto del ticket y usar el mismo importador.
 
 El lote se crea con ``rateSource = 'OCR·lote'`` y la subcategoría provisional
 ``'Importado OCR'``, y después se sincroniza con los metadatos del SKU — la
-misma regla que aplica el ajuste de ``batchImportOcrRows``
+misma regla que aplica el parche de ``batchImportOcrRows``
 (:func:`app.domain.ocr.sync_ocr_sku_metadata`).
 """
 
@@ -27,7 +27,11 @@ from ..state import AppState
 
 __all__ = ["render"]
 
-VAT_LABELS = {"exento": "Exento", "incluido": "IVA incluido", "mas_iva": "IVA + 16%"}
+VAT_LABELS = {
+    "exento": "Exento",
+    "incluido": "IVA incluido",
+    "mas_iva": "IVA + tasa indicada",
+}
 
 _ENGINE: Any = None
 
@@ -162,6 +166,9 @@ def _editor(
         mode = ui.select(VAT_LABELS, value="incluido", label="Modalidad IVA").classes(
             "w-full"
         )
+        vat_rate = ui.number(
+            "Tasa IVA (%)", value=16.0, min=0, max=100, step=0.01, format="%.2f"
+        ).classes("w-full")
         provider = ui.input("Comercio").classes("w-full")
 
     with ui.column().classes("w-full gap-1"):
@@ -171,6 +178,10 @@ def _editor(
     def import_batch() -> None:
         if not state.active_rate:
             ui.notify("No hay tasa activa: regístrala antes de importar.", type="warning")
+            return
+        batch_vat = 16.0 if vat_rate.value is None else float(vat_rate.value)
+        if not 0 <= batch_vat <= 100:
+            ui.notify("La tasa de IVA debe estar entre 0 y 100 %.", type="warning")
             return
         ocr_rate = {
             **state.active_rate,
@@ -199,6 +210,7 @@ def _editor(
                     rate=ocr_rate,
                     bs_amount=row["totalBs"],
                     mode=mode.value or "incluido",
+                    iva_rate=batch_vat / 100,
                     product_id=product_id,
                     quantity=row.get("quantity"),
                     provider=provider.value or "",
@@ -212,7 +224,7 @@ def _editor(
 
         # ``APP.products.push``: el catálogo en memoria ya incluye los SKU nuevos.
         state.refresh()
-        # Ajuste: el lote hereda los metadatos del SKU.
+        # Parche: el lote hereda los metadatos del SKU.
         for updated in domain_ocr.sync_ocr_sku_metadata(created, state.products):
             state.repo.put("transactions", updated)
 

@@ -1,7 +1,7 @@
 """Conexión y esquema de SQLite.
 
-Reemplaza ``openDB`` / ``idbOp`` / el objeto ``DB`` de la versión de referencia (líneas
-2774-2839 de la referencia).
+Reemplaza ``openDB`` / ``idbOp`` / el objeto ``DB`` de la versión de referencia
+(líneas 2774-2839 de la referencia).
 
 Diferencias deliberadas frente a la versión de referencia:
 
@@ -70,10 +70,36 @@ class Database:
     # -- ciclo de vida -----------------------------------------------------
 
     def initialize(self) -> "Database":
-        """Aplica ``schema.sql``. Es idempotente (todo es IF NOT EXISTS)."""
+        """Aplica ``schema.sql`` y las migraciones aditivas conocidas.
+
+        ``CREATE TABLE IF NOT EXISTS`` no añade columnas a una base ya creada,
+        así que las columnas nuevas se agregan aquí. Son migraciones mínimas y
+        solo añaden campos con valor por defecto; nunca borran datos.
+        """
         with self._lock:
             self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            self._migrate()
         return self
+
+    def _migrate(self) -> None:
+        """Añade columnas nuevas a bases creadas por versiones anteriores."""
+        columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(transactions)")
+        }
+        if "ivaRate" not in columns:
+            self._conn.execute(
+                "ALTER TABLE transactions "
+                "ADD COLUMN ivaRate REAL NOT NULL DEFAULT 0.16"
+            )
+            # Las bases antiguas no guardaban la alícuota. Se deduce de la
+            # relación IVA/base para no etiquetar como 16 % una compra que
+            # pudo haberse importado con otra tasa. Los exentos conservan el
+            # valor por defecto, que la auditoría ignora.
+            self._conn.execute(
+                "UPDATE transactions SET ivaRate = ivaMonto / baseImponible "
+                "WHERE taxMode <> 'exento' AND baseImponible > 0"
+            )
 
     def close(self) -> None:
         with self._lock:

@@ -75,10 +75,11 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 
 - **Doble entorno:** Personal y Profesional, con categorías, catálogo y transacciones independientes en la misma base de datos.
 - **Doble moneda nativa:** cada transacción guarda `amountBs`, `amountUsd`, `rate`, `rateDate` y `rateSource`. Nunca se recalcula con la tasa del día.
-- **IVA de 16 % (Venezuela):** con modos **Exento**, **IVA incluido** y **Más IVA**, y vista previa en vivo de base imponible y cuota.
+- **IVA configurable y auditable:** modos **Exento**, **IVA incluido** e **IVA sobre el monto**, con tasa editable por compra (16 % por defecto), vista previa en vivo y detalle de base, cuota y alícuota en el histórico.
 - **Catálogo SKU:** generación de códigos `PROD-P-XXXX` / `PROD-W-XXXX`, herencia de metadatos y propagación del nombre al renombrar un producto.
 - **Categorías dinámicas:** cada categoría define qué campos aplican (cantidad, unidad, marca, IVA, naturaleza…) y permite campos personalizados de texto, número, lista y sí/no.
-- **Editor de compras:** corrección y borrado con recálculo bidireccional Bs/USD, vista previa de IVA y validación.
+- **Editor de compras:** corrección y borrado con recálculo bidireccional Bs/USD, cambio de categoría, tasa de IVA editable, vista previa y validación.
+- **Registro continuo:** la fecha, la categoría y la tasa de IVA se pueden conservar entre compras para no repetirlas; un aviso muestra cuándo la fecha quedó fijada y un botón vuelve al día de hoy.
 - **Autocompletado tolerante a erratas:** busca por nombre, SKU, categoría, marca o comercio; al elegir un producto recupera sus datos y los de su última compra. Si escribes una variante parecida, sugiere el valor existente y evita duplicados al guardar.
 - **Tasa manual persistente:** se guarda en la configuración y sobrevive a la recarga; se libera al sincronizar con el BCV.
 - **OCR de tickets:** flujo con RapidOCR (ONNX, sin binarios externos) o texto pegado, tabla editable e importación por lote.
@@ -93,7 +94,7 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 | **Pivote** | Agrupación por comercio, marca, método de pago, plataforma de origen o subcategoría; mínimos, máximos, promedio, mediana y dispersión. |
 | **Frecuencia** | Intervalo promedio entre compras, próxima fecha estimada, ticket promedio y hábitos de abastecimiento, con la misma lista de agrupaciones que Variantes. |
 | **Proyecciones** | Regresión lineal sobre tasas BCV y precios de producto, con R² visible y horizonte configurable. |
-| **Categorías** | Impacto por categoría, reparto por método de pago, semáforo de presupuesto, Pareto 80/20 y dispersión de importes. |
+| **Categorías** | Impacto por categoría, auditoría de IVA por compra (base, cuota y tasa aplicada), reparto por método de pago, semáforo de presupuesto, Pareto 80/20 y dispersión de importes. |
 | **Extras** | Árbol jerárquico categoría → subcategoría → producto y tabla de productos con micro-análisis por SKU. |
 
 ### Reportes y cierre
@@ -126,7 +127,7 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 | Excel | openpyxl | Libro de 6 hojas. |
 | OCR | RapidOCR (ONNX) | Opcional; también acepta texto pegado. |
 | Tasas | httpx | Tres endpoints públicos; se usa el primero que responda. |
-| Pruebas | pytest + doctests | 510 pruebas automatizadas. |
+| Pruebas | pytest + doctests | 521 pruebas automatizadas. |
 
 **Arquitectura de ejecución:** un único proceso NiceGUI con SQLite. No hay un backend separado, un frontend estático que compilar ni un servicio externo obligatorio.
 
@@ -260,7 +261,7 @@ La suite cubre, entre otros:
 - persistencia SQLite y repositorio;
 - flujos de interfaz con `nicegui.testing.user_simulation`.
 
-**Estado actual:** 510 pruebas aprobadas.
+**Estado actual:** 521 pruebas aprobadas.
 
 ---
 
@@ -280,12 +281,14 @@ La suite cubre, entre otros:
 ## Limitaciones conocidas
 
 - **Un solo usuario local.** No hay autenticación, permisos ni sincronización entre dispositivos.
-- **Sin migraciones automáticas de esquema.** Antes de actualizar el programa, guarda un respaldo JSON y una copia del `.sqlite3`.
+- **Migraciones mínimas y aditivas.** Al abrir una base antigua se añaden columnas nuevas con su valor por defecto (por ejemplo `ivaRate`); no se borran datos. Aun así, guarda un respaldo JSON y una copia del `.sqlite3` antes de actualizar.
 - **El OCR es una ayuda, no una verdad absoluta.** La calidad depende de la foto; las filas se revisan antes de importar.
 - **El acta se entrega en HTML.** El PDF se obtiene con la impresión del navegador, no con un generador PDF interno.
 - **La interfaz es de escritorio.** Es responsive, pero no es una app móvil nativa.
 - **Los endpoints de tasa pueden cambiar.** Si fallan, la tasa manual y el historial local siguen funcionando.
 - **No hay integración bancaria.** Los datos se introducen a mano, por OCR o por importación de respaldo.
+
+> **Aviso fiscal y legal.** La aplicación es una herramienta de registro y análisis, no un sistema certificado de facturación ni asesoría contable, fiscal o legal. La tasa de IVA es editable y se guarda con cada compra, pero la alícuota, exenciones y tratamientos aplicables dependen de la normativa vigente y de la situación de cada contribuyente. Verifica los importes con tu contador o con la autoridad fiscal antes de presentar declaraciones.
 
 ---
 

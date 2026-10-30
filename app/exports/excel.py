@@ -2,7 +2,7 @@
 
 La versión de referencia usa SheetJS en el navegador; esta implementación usa ``openpyxl``. Lo que se
 verifica no es el fichero binario sino **el contenido de las hojas**: cada hoja
-se construye como una lista de diccionarios (clave = cabecera) y el verificación
+se construye como una lista de diccionarios (clave = cabecera) y el oráculo
 ejecuta ``exportXLSX`` con un SheetJS falso que graba exactamente esas listas.
 """
 
@@ -33,6 +33,39 @@ __all__ = [
 
 MS_PER_DAY = 86_400_000
 PROJECTION_HORIZONS = (7, 30, 90, 180, 365)
+
+
+def _has_custom_vat(txs: list[dict[str, Any]]) -> bool:
+    """¿Alguna compra usa una alícuota distinta de 16 %?"""
+    for tx in txs:
+        stored = tx.get("ivaRate")
+        if stored is not None:
+            try:
+                rate = float(stored)
+            except (TypeError, ValueError):
+                continue
+        else:
+            base = js_number_or_zero(tx.get("baseImponible"))
+            iva = js_number_or_zero(tx.get("ivaMonto"))
+            rate = iva / base if base > 0 else None
+        if rate is not None and round(rate * 100, 2) != 16.0:
+            return True
+    return False
+
+
+def _vat_percent(tx: dict[str, Any]) -> Any:
+    """Alícuota en porcentaje; se deduce de base/IVA si es un registro viejo."""
+    stored = tx.get("ivaRate")
+    if stored is not None:
+        try:
+            return js_round(float(stored) * 100, 2)
+        except (TypeError, ValueError):
+            return ""
+    base = js_number_or_zero(tx.get("baseImponible"))
+    iva = js_number_or_zero(tx.get("ivaMonto"))
+    if base > 0:
+        return js_round((iva / base) * 100, 2)
+    return ""
 
 SHEET_NAMES = (
     "1. Resumen",
@@ -101,6 +134,11 @@ def summary_rows(
         js_number_or_zero(sorted_rates[-1].get("value")) if sorted_rates else 0.0
     )
     rate_delta = ((rate_last - rate_first) / rate_first) * 100 if rate_first else 0.0
+    iva_label = (
+        "IVA acumulado Bs"
+        if _has_custom_vat(year_txs)
+        else "IVA (16%) acumulado Bs"
+    )
 
     return [
         {"Campo": "Reporte", "Valor": "Resumen Ejecutivo Anual"},
@@ -120,7 +158,7 @@ def summary_rows(
         },
         {"Campo": "", "Valor": ""},
         {"Campo": "Base imponible acumulada Bs", "Valor": js_round(base_total, 2)},
-        {"Campo": "IVA (16%) acumulado Bs", "Valor": js_round(iva_total, 2)},
+        {"Campo": iva_label, "Valor": js_round(iva_total, 2)},
         {"Campo": "Gastos exentos Bs", "Valor": js_round(exento_total, 2)},
         {"Campo": "", "Valor": ""},
         {"Campo": "Tasa BCV inicio año", "Valor": rate_first or "—"},
@@ -137,6 +175,7 @@ def ledger_rows(
 ) -> list[dict[str, Any]]:
     """Hoja «2. Libro Mayor»: una fila por transacción del año."""
     category_map = _by_id(categories)
+    show_vat = _has_custom_vat(year_txs)
     rows: list[dict[str, Any]] = []
     for tx in _sort_year_txs(year_txs):
         category = category_map.get(tx.get("categoryId"))
@@ -164,6 +203,13 @@ def ledger_rows(
             "Fuente Tasa": tx.get("rateSource") or "",
             "Notas": tx.get("notes") or "",
         }
+        if show_vat:
+            with_vat: dict[str, Any] = {}
+            for key, value in row.items():
+                with_vat[key] = value
+                if key == "Modalidad IVA":
+                    with_vat["Tasa IVA %"] = _vat_percent(tx)
+            row = with_vat
         for field in (category or {}).get("customFields") or []:
             values = tx.get("customValues") or {}
             value = values.get(field.get("id"), "")

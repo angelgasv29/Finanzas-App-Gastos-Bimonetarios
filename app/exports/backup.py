@@ -2,7 +2,7 @@
 
 El respaldo es un único JSON con los cinco almacenes y la configuración del
 ``localStorage``. La restauración decide qué hacer con cada registro igual que el
-de referencia:
+original:
 
 * las **transacciones** siempre se añaden y se les quita el ``id`` (lo asigna la
   base de datos);
@@ -201,12 +201,12 @@ def import_plan(
     }
 
 
-#: Campos que forman la firma anti-duplicados del ajuste.
+#: Campos que forman la firma anti-duplicados del parche (línea 8002).
 SIGNATURE_KEYS = ("workspace", "date", "productName", "amountBs")
 
 
 def import_signature(tx: dict[str, Any]) -> str:
-    """``${x.workspace}|${x.date}|${x.productName}|${x.amountBs}``.
+    """``${x.workspace}|${x.date}|${x.productName}|${x.amountBs}`` (línea 8002).
 
     La plantilla de JavaScript escribe ``undefined`` para un campo ausente y
     ``null`` para un campo nulo; aquí se replica el caso ausente.
@@ -223,9 +223,9 @@ def import_signature(tx: dict[str, Any]) -> str:
 def dedupe_imported(
     existing: list[dict[str, Any]], after: list[dict[str, Any]]
 ) -> list[Any]:
-    """Identificadores que el ajuste borra tras importar.
+    """Identificadores que el parche borra tras importar (línea 7999).
 
-    Una vez importado el respaldo, la versión de referencia elimina toda transacción **nueva**
+    Una vez importado el respaldo, el original elimina toda transacción **nueva**
     cuya firma coincida con una ya vista. La primera aparición de cada firma se
     conserva (sea previa o recién importada).
 
@@ -273,7 +273,7 @@ def plan_excel_import(
 ) -> dict[str, Any]:
     """Convierte las filas del «Libro Mayor» en productos y transacciones.
 
-    Reglas de la versión de referencia: se descartan las filas sin fecha, sin producto o con
+    Reglas del original: se descartan las filas sin fecha, sin producto o con
     ``Total Bs <= 0``; el producto se busca por nombre (sin distinguir
     mayúsculas) y, si no existe, se crea con un SKU nuevo y la primera categoría
     como categoría por defecto.
@@ -327,6 +327,12 @@ def plan_excel_import(
         total_usd = js_number_or_zero(
             _sheet_value(row, "Total USD", "totalUsd", "Total_USD")
         ) or (total_bs / rate if rate else 0)
+        raw_vat_rate = _sheet_value(row, "Tasa IVA %", "tasaIvaPct")
+        iva_rate = (
+            None
+            if raw_vat_rate in (None, "")
+            else js_number_or_zero(raw_vat_rate) / 100
+        )
 
         transactions.append(
             {
@@ -374,6 +380,8 @@ def plan_excel_import(
                 "updatedAt": now_ms,
             }
         )
+        if iva_rate is not None and round(iva_rate * 100, 2) != 16.0:
+            transactions[-1]["ivaRate"] = iva_rate
 
     return {
         "products": new_products,

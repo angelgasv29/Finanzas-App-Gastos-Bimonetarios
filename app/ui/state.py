@@ -1,11 +1,12 @@
 """Estado de la aplicación.
 
 Cada pestaña del navegador tiene su propio :class:`AppState`, igual que el
-de referencia guardaba ``APP`` en una global de la página. Sustituye a ese objeto y a la caché de tasas (``ratesCache``), pero **sin** variable
+original guardaba ``APP`` en una global de la página. Sustituye a ese objeto
+(líneas 2627-2640) y a la caché de tasas (``ratesCache``), pero **sin** variable
 global: se pasa explícitamente a los paneles.
 
 Los datos son compartidos (un solo fichero SQLite, como el IndexedDB del
-de referencia); lo que no se comparte es la configuración en memoria: entorno, año
+original); lo que no se comparte es la configuración en memoria: entorno, año
 fiscal, moneda, decimales, tema y tasa de sesión. Las preferencias sí se
 persisten, así que una pestaña nueva arranca con lo último guardado.
 
@@ -33,7 +34,7 @@ from ..domain import rates as domain_rates
 
 __all__ = ["AppState", "open_state"]
 
-#: Entornos de la versión de referencia (``initWorkspace``, línea 3042).
+#: Entornos del original (``initWorkspace``, línea 3042).
 WORKSPACES = ("personal", "profesional")
 
 
@@ -43,7 +44,7 @@ def open_state(
     """Abre (o crea) la base de datos y devuelve el estado listo para usar.
 
     La semilla de categorías se comprueba en cada apertura, igual que el arranque
-    de la versión de referencia (``seedCategoriesIfEmpty``): si un entorno quedó vacío, se
+    del original (``seedCategoriesIfEmpty``): si un entorno quedó vacío, se
     vuelve a sembrar.
 
     >>> import tempfile
@@ -77,6 +78,9 @@ class AppState:
     categories: list[dict[str, Any]] = field(default_factory=list)
     products: list[dict[str, Any]] = field(default_factory=list)
     rate_cache: list[dict[str, Any]] = field(default_factory=list)
+    #: Contexto que se conserva al registrar compras consecutivas (fecha,
+    #: categoría y tasa de IVA). Vive solo en la sesión, no en la base.
+    register_context: dict[str, Any] = field(default_factory=dict)
 
     _active_rate: dict[str, Any] | None = None
     _listeners: list[Callable[[], None]] = field(default_factory=list, repr=False)
@@ -176,7 +180,7 @@ class AppState:
             self.fiscal_year = int(year)
 
         # La tasa de sesión se guardaba en ``localStorage`` (``gb_session_rate``)
-        # y se restauraba al arrancar.
+        # y se restauraba al arrancar (líneas 7440-7442).
         raw_rate = self.repo.get_config(LS_KEYS["session_rate"])
         if raw_rate and raw_rate != "null":
             try:
@@ -234,7 +238,7 @@ class AppState:
         """Fija la tasa de la sesión (``saveManualRate``).
 
         Se persiste como ``gb_session_rate`` para que sobreviva a una recarga,
-        igual que la versión de referencia con ``localStorage``.
+        igual que el original con ``localStorage``.
         """
         stamp = date or dt.date.today().isoformat()
         self.session_rate = {"value": float(value), "date": stamp, "source": "Manual"}

@@ -1,6 +1,6 @@
 """Exportación a CSV (``toCSV`` y ``exportCSV``, 6672-6723).
 
-La versión de referencia genera tres CSV: transacciones, catálogo y tasas. El escapado es el
+El original genera tres CSV: transacciones, catálogo y tasas. El escapado es el
 suyo: solo entrecomilla si el valor contiene coma, comilla o salto de línea, y
 duplica las comillas interiores.
 """
@@ -39,6 +39,7 @@ TRANSACTION_HEADERS = [
     "plataformaOrigen",
     "naturaleza",
     "ivaMode",
+    "tasaIvaPct",
     "base",
     "iva",
     "totalBs",
@@ -82,7 +83,7 @@ def csv_filename(kind: str, now_ms: float) -> str:
 def transaction_headers(rows: list[dict[str, Any]]) -> list[str]:
     """Cabeceras del CSV de transacciones, incluidos los campos personalizados.
 
-    La versión de referencia recoge los ``Var_*`` con un ``Set`` que conserva el orden de
+    El original recoge los ``Var_*`` con un ``Set`` que conserva el orden de
     aparición (6706-6708).
 
     >>> transaction_headers([{"id": 1, "Var_Lote": "x"}, {"Var_Serie": "y"}])[-2:]
@@ -95,7 +96,13 @@ def transaction_headers(rows: list[dict[str, Any]]) -> list[str]:
             if key.startswith("Var_") and key not in seen:
                 seen.add(key)
                 extra.append(key)
-    return list(TRANSACTION_HEADERS) + extra
+    headers = list(TRANSACTION_HEADERS)
+    # La columna de tasa solo aparece cuando algún movimiento usa una alícuota
+    # distinta de la histórica del 16 %. Así el CSV de datos antiguos conserva
+    # exactamente el formato del original.
+    if not any("tasaIvaPct" in row for row in rows):
+        headers.remove("tasaIvaPct")
+    return headers + extra
 
 
 def _esc(value: Any) -> str:
@@ -107,7 +114,7 @@ def _esc(value: Any) -> str:
 
 
 def to_csv(rows: list[dict[str, Any]], headers: list[str]) -> str:
-    """CSV con el escapado de la versión de referencia.
+    """CSV con el escapado del original.
 
     >>> to_csv([{"a": "x,y", "b": "simple"}], ["a", "b"])
     'a,b\\n"x,y",simple'
@@ -122,11 +129,45 @@ def to_csv(rows: list[dict[str, Any]], headers: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _has_custom_vat(txs: list[dict[str, Any]]) -> bool:
+    """¿Alguna compra usa una alícuota distinta de 16 %?"""
+    for tx in txs:
+        stored = tx.get("ivaRate")
+        if stored is not None:
+            try:
+                rate = float(stored)
+            except (TypeError, ValueError):
+                continue
+        else:
+            base = float(tx.get("baseImponible") or 0)
+            iva = float(tx.get("ivaMonto") or 0)
+            rate = iva / base if base > 0 else None
+        if rate is not None and round(rate * 100, 2) != 16.0:
+            return True
+    return False
+
+
+def _vat_percent(tx: dict[str, Any]) -> Any:
+    """Alícuota en porcentaje para el CSV; vacía si no se puede deducir."""
+    stored = tx.get("ivaRate")
+    if stored is not None:
+        try:
+            return round(float(stored) * 100, 2)
+        except (TypeError, ValueError):
+            return ""
+    base = float(tx.get("baseImponible") or 0)
+    iva = float(tx.get("ivaMonto") or 0)
+    if base > 0:
+        return round((iva / base) * 100, 2)
+    return ""
+
+
 def transactions_rows(
     txs: list[dict[str, Any]], categories: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Filas de ``exportCSV('tx')``, con las columnas de campos personalizados."""
     category_map = {category.get("id"): category for category in categories}
+    show_vat = _has_custom_vat(txs)
     rows: list[dict[str, Any]] = []
     for tx in txs:
         category = category_map.get(tx.get("categoryId"))
@@ -152,6 +193,8 @@ def transactions_rows(
             "tasa": tx.get("rate"),
             "notas": tx.get("notes") or "",
         }
+        if show_vat:
+            row["tasaIvaPct"] = _vat_percent(tx)
         custom_fields = (category or {}).get("customFields") or []
         for field in custom_fields:
             values = tx.get("customValues") or {}

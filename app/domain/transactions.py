@@ -1,10 +1,11 @@
 """Reglas de las transacciones: alta, edición y recálculo bidireccional.
 
-Implementación del formulario de registro (líneas 3800-3832 y 3927-3994) y del editor.
+Porteo del formulario de registro (líneas 3800-3832 y 3927-3994) y del editor
+(líneas 4278-4400).
 
 Aquí no hay DOM. Cada función recibe los valores ya leídos de los campos y
 devuelve datos; la interfaz se limita a escribirlos. Las dos funciones que en el
-de referencia escriben directamente en un ``<input>`` (``recalcBsUsd`` y el
+original escriben directamente en un ``<input>`` (``recalcBsUsd`` y el
 ``wireEditRecalc`` del editor) devuelven un diccionario ``id del campo → valor``
 para que el resultado sea verificable sin navegador.
 """
@@ -24,7 +25,7 @@ from ..core.money import (
 )
 from .errors import MissingRateError, ValidationError
 from .rates import rate_value_of
-from .vat import DEFAULT_VAT_MODE, compute_vat
+from .vat import DEFAULT_VAT_MODE, compute_vat, normalize_vat_rate
 
 __all__ = [
     "validate",
@@ -39,12 +40,12 @@ __all__ = [
     "DEFAULT_UNIT",
 ]
 
-# ``unit: $('#txUnit')?.value || 'unidad'``.
+# ``unit: $('#txUnit')?.value || 'unidad'`` (línea 3949).
 DEFAULT_UNIT = "unidad"
 
 
 # ---------------------------------------------------------------------------
-# Validación
+# Validación (líneas 3933-3935)
 # ---------------------------------------------------------------------------
 
 
@@ -53,7 +54,7 @@ def validate(
 ) -> None:
     """Comprueba los cuatro campos obligatorios.
 
-    Referencia::
+    Original::
 
         if (!catId || !date || !productName || bs <= 0) {
           toast('Completa los campos obligatorios.', 'warn'); return; }
@@ -91,7 +92,7 @@ def require_rate(rate: dict[str, Any] | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Catálogo de productos
+# Catálogo de productos (líneas 3944-3956)
 # ---------------------------------------------------------------------------
 
 
@@ -113,10 +114,10 @@ def resolve_product(
     """Decide el ``productId`` y, si hace falta, crea el producto.
 
     Devuelve ``(product_id, producto_nuevo)``. El producto nuevo también se
-    devuelve para que quien llama lo guarde (la versión de referencia hace ``DB.put`` y
+    devuelve para que quien llama lo guarde (el original hace ``DB.put`` y
     ``APP.products.push``).
 
-    Referencia::
+    Original::
 
         let productId = $('#txProductId').value.trim();
         const existing = APP.products.find(p => p.name.toLowerCase() === productName.toLowerCase());
@@ -166,7 +167,7 @@ def resolve_product(
 
 
 # ---------------------------------------------------------------------------
-# Alta
+# Alta (líneas 3927-3985)
 # ---------------------------------------------------------------------------
 
 
@@ -200,6 +201,7 @@ def build_transaction(
     rate: dict[str, Any],
     bs_amount: Any,
     mode: str = DEFAULT_VAT_MODE,
+    iva_rate: Any = None,
     product_id: str | None = None,
     quantity: Any = None,
     unit: Any = None,
@@ -215,7 +217,7 @@ def build_transaction(
 ) -> dict[str, Any]:
     """Construye el registro que se escribirá en ``transactions``.
 
-    Mismas claves y mismo orden que el objeto ``tx`` de la versión de referencia, para que el
+    Mismas claves y mismo orden que el objeto ``tx`` del original, para que el
     repositorio lo acepte sin traducción.
 
     >>> tx = build_transaction(workspace="personal", date="2026-03-15",
@@ -227,7 +229,7 @@ def build_transaction(
     (3.1659, 'BCV', '', None)
 
     El USD se calcula con el total **sin redondear**, como ``const usd = total /
-    rateVal`` de la versión de referencia; el Bs guardado sí va redondeado a 2.
+    rateVal`` del original; el Bs guardado sí va redondeado a 2.
 
     >>> otro = build_transaction(workspace="personal", date="2026-03-15",
     ...     category_id="cat_1", product_name="Harina",
@@ -239,7 +241,8 @@ def build_transaction(
     require_rate(rate)
     stamp = timestamp if timestamp is not None else now_ms()
 
-    amounts = compute_vat(bs_amount, mode)
+    vat_rate = normalize_vat_rate(iva_rate)
+    amounts = compute_vat(bs_amount, mode, vat_rate)
     rate_val = rate_value_of(rate)
     usd = amounts.total / rate_val
 
@@ -260,6 +263,7 @@ def build_transaction(
         "originPlatform": _text(origin_platform),
         "nature": _text(nature),
         "taxMode": mode,
+        "ivaRate": vat_rate,
         "baseImponible": js_round(amounts.base, 2),
         "ivaMonto": js_round(amounts.iva, 2),
         "amountBs": js_round(amounts.total, 2),
@@ -279,7 +283,7 @@ def _year_of(date: str) -> int:
 
     >>> _year_of("2026-03-15")
     2026
-    >>> _year_of("sin-fecha")   # la versión de referencia guardaría NaN aquí
+    >>> _year_of("sin-fecha")   # el original guardaría NaN aquí
     0
     """
     year = js_parse_int(date[:4] if date else "", 10)
@@ -289,14 +293,14 @@ def _year_of(date: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Edición — Bug #2
+# Edición (líneas 4356-4399) — Bug #2
 # ---------------------------------------------------------------------------
 
 
 def resolve_edited_bs(bs: Any, usd: Any, rate_value: Any) -> float:
     """Reconstruye el Bs editado desde el USD (Bug #2, líneas 4361-4366).
 
-    Referencia::
+    Original::
 
         let bs = parseFloat($('#etxBs').value) || 0;
         if (rateVal > 0 && usdEdited > 0) {
@@ -332,18 +336,23 @@ def apply_edit(
     usd_amount: Any,
     mode: str,
     rate_value: Any,
+    iva_rate: Any = None,
+    category_id: Any = None,
     quantity: Any = None,
     unit: Any = None,
     brand: Any = None,
+    subcategory: Any = None,
     provider: Any = None,
+    payment_method: Any = None,
     origin_platform: Any = None,
+    nature: Any = None,
     notes: Any = None,
     custom_values: dict[str, Any] | None = None,
     timestamp: int | None = None,
 ) -> dict[str, Any]:
     """Aplica los cambios del editor sobre una transacción existente.
 
-    La versión de referencia hace ``{...tx, ...overrides}``: se conserva todo lo que no se
+    El original hace ``{...tx, ...overrides}``: se conserva todo lo que no se
     toca (``createdAt``, ``categoryId``, ``subcategory``…).
 
     >>> base = {"id": 7, "createdAt": 1, "categoryId": "cat_1", "subcategory": "x",
@@ -356,7 +365,7 @@ def apply_edit(
     >>> out["amountBs"], out["baseImponible"], out["ivaMonto"], out["amountUsd"]
     (232.0, 200.0, 32.0, 5.8)
 
-    Igual que la versión de referencia, el USD sale del total sin redondear:
+    Igual que el original, el USD sale del total sin redondear:
 
     >>> otro = apply_edit(base, date="2026-04-01", product_name="Arroz",
     ...     bs_amount=100.01, usd_amount=0, mode="mas_iva", rate_value=1)
@@ -367,7 +376,10 @@ def apply_edit(
     rate = js_number_or_zero(rate_value) or js_number_or_zero(tx.get("rate"))
     bs = resolve_edited_bs(bs_amount, usd_amount, rate)
 
-    amounts = compute_vat(bs, mode)
+    vat_rate = normalize_vat_rate(
+        iva_rate if iva_rate is not None else tx.get("ivaRate")
+    )
+    amounts = compute_vat(bs, mode, vat_rate)
 
     updated = dict(tx)
     updated.update(
@@ -380,21 +392,37 @@ def apply_edit(
             "baseImponible": js_round(amounts.base, 2),
             "ivaMonto": js_round(amounts.iva, 2),
             "taxMode": mode,
+            "ivaRate": vat_rate,
             "rate": rate,
             "quantity": _parse_float_or_null(quantity),
             "unit": _text(unit) or tx.get("unit"),
             "brand": _text(brand) or tx.get("brand"),
+            "subcategory": (
+                _text(subcategory)
+                if subcategory is not None
+                else (tx.get("subcategory") or "")
+            ),
             "provider": _text(provider) or tx.get("provider"),
+            "paymentMethod": (
+                _text(payment_method)
+                if payment_method is not None
+                else (tx.get("paymentMethod") or "")
+            ),
             "originPlatform": (
                 _text(origin_platform)
                 if origin_platform is not None
                 else (tx.get("originPlatform") or "")
+            ),
+            "nature": (
+                _text(nature) if nature is not None else (tx.get("nature") or "")
             ),
             "notes": _text(notes),
             "customValues": custom_values if custom_values is not None else {},
             "updatedAt": stamp,
         }
     )
+    if category_id is not None:
+        updated["categoryId"] = category_id
     return updated
 
 
@@ -409,7 +437,7 @@ def recalc_bs_usd(
     """``recalcBsUsd(source)``: recalcula el campo contrario.
 
     Devuelve ``{'txAmountBs': …, 'txAmountUsd': …}`` con el valor nuevo de cada
-    campo, o ``None`` en el que no cambia. Es una **cadena**: la versión de referencia escribe
+    campo, o ``None`` en el que no cambia. Es una **cadena**: el original escribe
     ``toFixed(4)`` en USD y ``toFixed(2)`` en Bs.
 
     >>> recalc_bs_usd("bs", "116", "", 36.64)
@@ -443,7 +471,7 @@ def recalc_bs_usd(
 def editor_recalc(
     field: str, bs_value: Any, usd_value: Any, rate_value: Any
 ) -> dict[str, str | None]:
-    """Recálculo bidireccional del modal de edición.
+    """Recálculo bidireccional del modal de edición (líneas 4330-4354).
 
     El editor tiene **tres** campos y se recalcula al editar cualquiera:
 
@@ -488,7 +516,7 @@ def editor_recalc(
 
 
 # ---------------------------------------------------------------------------
-# Repetir compra
+# Repetir compra (líneas 4407-4500)
 # ---------------------------------------------------------------------------
 
 
@@ -497,7 +525,7 @@ def repeat_transaction(
 ) -> dict[str, Any]:
     """Clona los metadatos de una compra para volver a registrarla.
 
-    Deja la fecha en **hoy** y vacía los montos: en la versión de referencia el formulario se
+    Deja la fecha en **hoy** y vacía los montos: en el original el formulario se
     rellena pero el usuario debe teclear el importe.
 
     Devuelve los valores del formulario y el aviso de unidad normalizada.
@@ -532,6 +560,7 @@ def repeat_transaction(
         "nature": tx.get("nature") or "",
         "notes": tx.get("notes") or "",
         "taxMode": tx.get("taxMode") or DEFAULT_VAT_MODE,
+        "ivaRate": tx.get("ivaRate"),
         "unitWarning": warning,
         "hint": (
             f'Compra clonada de #{tx.get("id")} · SKU '

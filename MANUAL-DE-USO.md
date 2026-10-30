@@ -135,14 +135,22 @@ hayas escrito. No hace falta crearlo antes en el Catálogo.
 
 ### Modalidad de IVA
 
-| Modalidad | Qué significa | Ejemplo con 116 Bs |
+| Modalidad | Qué significa | Ejemplo con 116 Bs y 16 % |
 |---|---|---|
 | **Exento** | No lleva IVA. | Base 116 · IVA 0 · Total 116 |
 | **IVA incluido** | El monto que escribes **ya incluye** el IVA. | Base 100 · IVA 16 · Total 116 |
-| **IVA + 16%** | El IVA **se suma** al monto que escribes. | Base 116 · IVA 18,56 · Total 134,56 |
+| **IVA + tasa indicada** | El IVA **se suma** al monto que escribes. | Base 116 · IVA 18,56 · Total 134,56 |
 
-Elige la que corresponda al ticket. La vista previa te muestra Base, IVA, Total y
-el equivalente en dólares antes de guardar.
+El campo **Tasa IVA (%)** trae **16 %** por defecto, pero es editable. La tasa se
+guarda con cada compra y aparece después en la **Auditoría de IVA** de Análisis,
+para que el histórico siga siendo comprobable si la ley cambia. Si el ticket o la
+normativa aplicable indican otra alícuota, cámbiala antes de guardar.
+
+Elige la modalidad que corresponda al ticket. La vista previa te muestra Base,
+IVA, Total, el equivalente en dólares y la tasa aplicada antes de guardar.
+
+> Esta aplicación no sustituye asesoría fiscal ni legal. Confirma la alícuota,
+> exenciones y tratamientos con tu contador o con la autoridad fiscal.
 
 ### Naturaleza
 
@@ -176,7 +184,10 @@ Después puedes volver a cargar la demo o registrar tus compras reales.
 
 Entra a **Registrar**. Arriba verás la tasa que se usará.
 
-1. **Fecha**: viene con la de hoy. Cámbiala si la compra es de otro día.
+1. **Fecha**: viene con la de hoy. Cámbiala si la compra es de otro día. Si la
+   fecha no es hoy, aparece un aviso **«Fecha fijada»** y el botón **Usar fecha
+   de hoy** para volver. Al guardar, la fecha puede conservarse para la siguiente
+   compra (ver el paso 12).
 2. **Categoría**: elige la bolsa del gasto. Al cambiarla, el formulario **muestra
    u oculta campos** según lo configurado en esa categoría.
 3. **Producto**: escribe el nombre. Si ya existe, se reutiliza; si no, se crea el
@@ -187,15 +198,19 @@ Entra a **Registrar**. Arriba verás la tasa que se usará.
 6. **Plataforma origen**: dónde se hizo el pago (Binance P2P, Zinli, bancos…).
    Es opcional; sirve para el análisis de plataformas.
 7. **Naturaleza**: `Recurrente` o `Extraordinario`.
-8. **Modalidad IVA**: `Exento`, `IVA incluido` o `IVA + 16%`.
-9. **Monto Bs** (obligatorio): el total pagado en bolívares.
-   - Si solo tienes el monto en dólares, escríbelo en **Monto USD (opcional)** y
-     el programa calcula los bolívares con la tasa activa.
-10. Revisa la vista previa: **Base**, **IVA**, **Total** y **≈ $**.
-11. Si el precio se aleja mucho de lo que sueles pagar por ese producto, aparece
+8. **Modalidad IVA**: `Exento`, `IVA incluido` o `IVA + tasa indicada`.
+9. **Tasa IVA (%)**: 16 % por defecto. Cámbiala si aplica otra alícuota. Se
+   guarda con la compra y se muestra en la auditoría.
+10. **Monto Bs** (obligatorio): el total pagado en bolívares.
+    - Si solo tienes el monto en dólares, escríbelo en **Monto USD (opcional)** y
+      el programa calcula los bolívares con la tasa activa.
+11. Revisa la vista previa: **Base**, **IVA**, **Total**, **≈ $** y **Tasa IVA**.
+12. Si el precio se aleja mucho de lo que sueles pagar por ese producto, aparece
     un **aviso de precio** con la media y el mínimo histórico.
-12. Pulsa **Guardar compra**. La compra aparece abajo, en **Movimientos
-    recientes**, y todos los paneles se actualizan.
+13. Pulsa **Guardar compra**. La compra aparece abajo, en **Movimientos
+    recientes**, y todos los paneles se actualizan. Si la casilla **Conservar
+    fecha, categoría y tasa IVA al guardar** está marcada, esos tres datos siguen
+    puestos para la siguiente compra; el producto y el monto se limpian.
 
 ### Repetir una compra
 
@@ -247,9 +262,10 @@ consultar en **Reportes → CSV · movimientos**.
 
 ### Editar
 
-Se abre una ventana con los datos de la compra: fecha, producto, monto en Bs,
-monto en USD, modalidad de IVA, tasa aplicada, y —si la categoría los pide—
-cantidad, unidad, marca, comercio, plataforma de origen y campos personalizados.
+Se abre una ventana con los datos de la compra: fecha, producto, **categoría**,
+monto en Bs, monto en USD, modalidad y **tasa de IVA**, tasa de cambio, y -si la
+categoría los pide- cantidad, unidad, marca, subcategoría, comercio, forma de
+pago, plataforma de origen, naturaleza y campos personalizados.
 También las notas.
 
 - Al cambiar el **Monto Bs**, el **Monto USD** se recalcula con la tasa del
@@ -257,8 +273,9 @@ También las notas.
   cambias la **tasa**, se recalcula el monto en Bs a partir del USD.
 - La vista previa muestra **Base**, **IVA** y **Total** antes de guardar.
 - **Guardar cambios** actualiza la compra y todos los paneles.
-- La **categoría** no se cambia desde aquí. Si te equivocaste de categoría,
-  borra la compra y regístrala de nuevo.
+- La **categoría sí se puede cambiar** desde aquí. Al elegir otra, se muestran
+  sus campos y se reclasifica la compra sin borrarla ni duplicarla. Los campos
+  personalizados que pertenecían a la categoría anterior dejan de mostrarse.
 - El **SKU** tampoco se modifica: la compra guarda el nombre que escribas, pero la
   ficha del catálogo queda como estaba.
 
@@ -381,7 +398,7 @@ Luego, las siete sub-pestañas:
 | **Pivote** | Cruces por comercio, método de pago, etc., con filtro por producto y opción «solo compras del mismo día». |
 | **Frecuencia** | Cada cuánto compras según la misma lista de agrupaciones, con intervalo, ticket medio y próxima fecha estimada. Si un grupo solo tiene compras del mismo día, el intervalo aparece como «Mismo día» y no se inventa una próxima fecha. |
 | **Proyecciones** | Proyección de la tasa de cambio y del precio de un producto. |
-| **Categorías** | Impacto por categoría y reparto por método de pago. |
+| **Categorías** | Impacto por categoría, auditoría de IVA por compra (base, cuota, total y tasa aplicada) y reparto por método de pago. |
 | **Extras** | Semáforo de presupuesto por categoría, Pareto 80/20, dispersión diaria, árbol categoría → subcategoría → producto y tabla de productos. |
 
 Las cifras de Análisis usan el **período elegido**, no todo el año.
@@ -669,7 +686,7 @@ carpeta. Dos caminos:
 | Quedan `-wal` y `-shm` | La app se cerró de golpe | Abre la app una vez y ciérrala normalmente; no los borres a mano. |
 | «File is not a database» o el archivo no abre | Archivo corrupto o reemplazado por otro tipo de archivo | Restaura la última copia (archivo o JSON). No uses «reparadores» a ciegas. |
 | Borraste algo por error | No hay papelera | Restaura el respaldo más reciente; el JSON vuelve a añadir lo que falte. |
-| Quieres actualizar el programa | Puede cambiar la estructura de las tablas | **Respalda primero.** Las tablas se crean si faltan, pero todavía no hay migraciones automáticas: sigue las notas de la versión nueva. |
+| Quieres actualizar el programa | Puede cambiar la estructura de las tablas | **Respalda primero.** Las tablas se crean si faltan y las columnas nuevas se añaden de forma automática y aditiva; aun así, guarda una copia del `.sqlite3` antes de actualizar. |
 
 ### 15.12 Tamaño y rendimiento
 
@@ -712,10 +729,22 @@ carpeta. Dos caminos:
 
 ---
 
-## 17. Limitaciones conocidas
+## 17. Aviso fiscal y legal
 
-- El editor de compras no permite cambiar la **categoría** ni la **ficha del SKU**:
-  si te equivocaste en eso, borra la compra y vuelve a registrarla (sección 7).
+Esta es una herramienta de registro y análisis, **no** un sistema certificado de
+facturación ni asesoría contable, fiscal o legal. La tasa de IVA es editable y
+queda guardada con cada compra, pero la alícuota, las exenciones y el tratamiento
+aplicable dependen de la normativa vigente y de la situación de cada
+contribuyente. Verifica los importes con tu contador o con la autoridad fiscal
+antes de presentar declaraciones.
+
+---
+
+## 18. Limitaciones conocidas
+
+- El editor de compras permite cambiar la **categoría**, la tasa de IVA y los
+  campos de la compra, pero **no renombra ni cambia la ficha del SKU**. Para
+  corregir el nombre o los metadatos maestros del producto, usa **Catálogo**.
 - **Un solo usuario**, sin contraseña. No expongas el puerto a internet.
 - El borrado total y el cierre con limpieza son **irreversibles**.
 - El **redondeo** se hace con los decimales configurados; los totales pueden
@@ -730,7 +759,7 @@ carpeta. Dos caminos:
 
 ---
 
-## 18. Glosario
+## 19. Glosario
 
 | Término | Significado |
 |---|---|
@@ -742,7 +771,7 @@ carpeta. Dos caminos:
 | **SKU** | Ficha de un producto concreto (nombre, marca, unidad, comercio). |
 | **Categoría** | Grupo del gasto y conjunto de campos que pide el formulario. |
 | **IVA incluido** | El importe escrito ya lleva el impuesto dentro. |
-| **IVA + 16%** | El impuesto se suma al importe escrito. |
+| **IVA + tasa indicada** | El impuesto se suma al importe escrito, usando la tasa editable de la compra (16 % por defecto). |
 | **Recurrente** | Gasto que se repite cada mes. |
 | **Snapshot / Acta** | Foto resumida de un ejercicio, guardada como histórico. |
 | **Proyección** | Estimación de cómo terminará el mes o el año al ritmo actual. |
@@ -756,7 +785,7 @@ carpeta. Dos caminos:
 
 ---
 
-## 19. Rutina sugerida
+## 20. Rutina sugerida
 
 **Cada compra:** Registrar → guardar. Si el ticket es una foto, OCR.
 

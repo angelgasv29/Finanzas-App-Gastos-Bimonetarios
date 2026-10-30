@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     originPlatform TEXT    NOT NULL DEFAULT '',
     nature         TEXT    NOT NULL DEFAULT '',
     taxMode        TEXT    NOT NULL DEFAULT '',   -- exento | incluido | mas_iva
+    ivaRate        REAL    NOT NULL DEFAULT 0.16, -- fracción: 0.16 = 16 %
     baseImponible  REAL    NOT NULL DEFAULT 0,
     ivaMonto       REAL    NOT NULL DEFAULT 0,
     amountBs       REAL    NOT NULL DEFAULT 0,    -- total
@@ -88,7 +89,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     updatedAt      INTEGER NOT NULL DEFAULT 0
 );
 
--- Índices de la versión de referencia: workspace, date, [workspace,date], productId, year,
+-- Índices del original: workspace, date, [workspace,date], productId, year,
 -- [workspace,year].
 CREATE INDEX IF NOT EXISTS idx_tx_workspace       ON transactions(workspace);
 CREATE INDEX IF NOT EXISTS idx_tx_date            ON transactions(date);

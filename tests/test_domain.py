@@ -199,6 +199,38 @@ def test_alta_completa_calcula_iva_y_dolares():
     assert record["createdAt"] == record["updatedAt"] == 1
 
 
+def test_alta_guarda_la_tasa_de_iva_personalizada():
+    record = transactions.build_transaction(
+        workspace="personal",
+        date="2026-03-15",
+        category_id="cat_1",
+        product_name="Harina",
+        rate={"value": 40, "date": "2026-03-15", "source": "BCV"},
+        bs_amount=100,
+        mode="mas_iva",
+        iva_rate=0.08,
+        timestamp=1,
+    )
+    assert record["ivaRate"] == 0.08
+    assert record["baseImponible"] == 100.0
+    assert record["ivaMonto"] == 8.0
+    assert record["amountBs"] == 108.0
+    assert record["amountUsd"] == 2.7
+
+
+def test_alta_sin_tasa_iva_explicita_usa_el_16_por_ciento():
+    record = transactions.build_transaction(
+        workspace="personal",
+        date="2026-03-15",
+        category_id="cat_1",
+        product_name="Harina",
+        rate={"value": 40, "date": "2026-03-15", "source": "BCV"},
+        bs_amount=116,
+        timestamp=1,
+    )
+    assert record["ivaRate"] == 0.16
+
+
 def test_alta_guarda_cero_y_vacio_como_null():
     record = transactions.build_transaction(
         workspace="personal",
@@ -276,7 +308,7 @@ def test_producto_elegido_a_mano_no_se_crea():
 
 
 def test_edicion_conserva_lo_que_no_se_toca():
-    base = {
+    original = {
         "id": 7,
         "createdAt": 1,
         "categoryId": "cat_1",
@@ -287,7 +319,7 @@ def test_edicion_conserva_lo_que_no_se_toca():
         "unit": "kg",
     }
     updated = transactions.apply_edit(
-        base,
+        original,
         date="2026-04-01",
         product_name="Arroz",
         bs_amount=232,
@@ -308,7 +340,7 @@ def test_edicion_conserva_lo_que_no_se_toca():
     # Sin tasa nueva se conserva la anterior.
     assert (
         transactions.apply_edit(
-            base,
+            original,
             date="2026-04-01",
             product_name="Arroz",
             bs_amount=1,
@@ -318,6 +350,32 @@ def test_edicion_conserva_lo_que_no_se_toca():
         )["rate"]
         == 36.64
     )
+
+
+def test_la_edicion_puede_cambiar_categoria_y_tasa_iva():
+    original = {
+        "id": 7,
+        "categoryId": "cat_1",
+        "rate": 40,
+        "amountBs": 116.0,
+        "amountUsd": 2.9,
+        "ivaRate": 0.16,
+    }
+    updated = transactions.apply_edit(
+        original,
+        date="2026-03-15",
+        product_name="Harina",
+        bs_amount=108,
+        usd_amount=108 / 40,
+        mode="incluido",
+        rate_value=40,
+        iva_rate=0.08,
+        category_id="cat_2",
+    )
+    assert updated["categoryId"] == "cat_2"
+    assert updated["ivaRate"] == 0.08
+    assert updated["baseImponible"] == 100.0
+    assert updated["ivaMonto"] == 8.0
 
 
 def test_el_usd_editado_manda_sobre_el_bs():
@@ -354,7 +412,7 @@ def test_recalculo_del_editor_mantiene_el_usd_al_cambiar_la_tasa():
 
 
 def test_repetir_compra_cambia_la_fecha_y_vacia_los_montos():
-    base = {
+    original = {
         "id": 3,
         "productId": "PROD-P-A",
         "productName": "Harina",
@@ -363,7 +421,7 @@ def test_repetir_compra_cambia_la_fecha_y_vacia_los_montos():
         "unit": "kg",
         "taxMode": "exento",
     }
-    clone = transactions.repeat_transaction(base, "2026-10-17", ("unidad", "kg"))
+    clone = transactions.repeat_transaction(original, "2026-10-17", ("unidad", "kg"))
     assert clone["date"] == "2026-10-17"
     assert clone["quantity"] == 2
     assert clone["taxMode"] == "exento"
@@ -504,7 +562,7 @@ def test_run_rate_sin_datos_no_divide_por_cero():
 
 
 def test_run_rate_mira_todo_el_mes_auditado_no_solo_lo_pasado():
-    # La versión de referencia filtra por prefijo de fecha, no por "hoy": un movimiento del
+    # El original filtra por prefijo de fecha, no por "hoy": un movimiento del
     # día 20 cuenta aunque hoy sea el 15. Un año anterior no cuenta.
     txs = [
         tx(date="2026-03-20", amountUsd=50),
@@ -518,7 +576,7 @@ def test_run_rate_mira_todo_el_mes_auditado_no_solo_lo_pasado():
 
 
 def test_run_rate_audita_el_ultimo_mes_con_movimiento():
-    # Sin movimientos en el mes del reloj, el ajuste audita el último mes con
+    # Sin movimientos en el mes del reloj, el parche audita el último mes con
     # datos y corta en su último día con actividad (no en el día de hoy).
     txs = [tx(date="2026-01-20", amountUsd=50)]
     rate = runrate.compute_run_rate(
@@ -645,7 +703,7 @@ def test_recurrente_necesita_al_menos_dos_compras():
 
 
 def test_recurrente_bastan_dos_compras():
-    # El ajuste baja el mínimo de tres compras a dos.
+    # El parche baja el mínimo de tres compras a dos.
     txs = _compras(["2026-02-04", "2026-03-06"])
     pending = recurring.find_recurring_commitments(
         txs, fiscal_year=2026, now=dt.datetime(2026, 4, 3, 12, 0)
@@ -687,7 +745,7 @@ def test_recurrente_lejano_se_descarta():
 
 
 def test_recurrente_sin_id_se_agrupa_por_nombre():
-    # El ajuste agrupa por ``productId || productName``.
+    # El parche agrupa por ``productId || productName``.
     txs = _compras(["2026-02-04", "2026-03-06"], productId="")
     pending = recurring.find_recurring_commitments(
         txs, fiscal_year=2026, now=dt.datetime(2026, 4, 3, 12, 0)
@@ -766,7 +824,7 @@ def _hist(*unit_prices, quantity=2):
 
 
 def test_alerta_avisa_con_una_sola_compra_previa():
-    # El ajuste quita el mínimo de dos compras previas.
+    # El parche quita el mínimo de dos compras previas.
     alert = prices.compute_price_alert(_hist(2.5), 3.0)
     assert alert is not None
     assert alert.level == prices.LEVEL_BAD  # +20 % sobre la única referencia
@@ -830,7 +888,7 @@ def test_alerta_sin_comercio():
         {"date": "2026-01-10", "quantity": 2, "amountUsd": 5},
         {"date": "2026-02-10", "quantity": 2, "amountUsd": 7},
     ]
-    # El guion es el marcador de la versión de referencia (``low.tx.provider || '—'``).
+    # El guion es el marcador del original (``low.tx.provider || '—'``).
     assert prices.compute_price_alert(history, 3.0).low_where == "— · 2026-01-10"
 
 
@@ -933,7 +991,7 @@ def test_mismo_mes():
 
 
 def test_fecha_local_a_medianoche_no_desplaza_el_dia():
-    # La versión de referencia construye ``new Date('2026-03-15T00:00:00')`` (local).
+    # El original construye ``new Date('2026-03-15T00:00:00')`` (local).
     ms = dates.local_midnight_ms("2026-03-15")
     assert dates.local_date_at(ms) == dt.date(2026, 3, 15)
 
