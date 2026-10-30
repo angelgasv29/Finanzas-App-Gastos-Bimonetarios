@@ -212,6 +212,23 @@ Entra a **Registrar**. Arriba verás la tasa que se usará.
     fecha, categoría y tasa IVA al guardar** está marcada, esos tres datos siguen
     puestos para la siguiente compra; el producto y el monto se limpian.
 
+### Buscar y revisar los movimientos
+
+La tarjeta **Movimientos recientes** está pensada para seguir siendo cómoda con
+cientos de compras:
+
+- **Buscador:** escribe parte del producto, categoría, comercio, notas o campo
+  personalizado. La tabla se reduce mientras escribes.
+- **Filtro por categoría:** muestra solo las compras de una categoría.
+- **Vista lista con desplazamiento:** todas las compras filtradas quedan dentro
+  de una caja con barra de desplazamiento y la cabecera fija. No hay que bajar
+  por una página interminable.
+- **Vista cascada por mes:** agrupa las compras por mes. Cada mes se puede
+  plegar o desplegar y muestra cuántos movimientos y cuánto suman en Bs y USD.
+- **Limpiar:** vuelve a mostrar todo y regresa a la vista de lista.
+
+El contador indica cuántos movimientos se están mostrando del total.
+
 ### Repetir una compra
 
 Arriba del formulario está **Autocompletar producto**. Escribe parte del nombre,
@@ -257,8 +274,9 @@ movimiento**:
 2. Elige la compra (verás `#número · fecha · producto · total`).
 3. Pulsa **Editar** para cambiar sus datos o **Borrar** para eliminarla.
 
-La lista muestra los **50 movimientos más recientes**. Los más antiguos se pueden
-consultar en **Reportes → CSV · movimientos**.
+El selector incluye **todos los movimientos del entorno**, sin límite de 50.
+Escribe en el campo para localizar uno por producto, fecha o total. Si necesitas
+una copia completa, usa **Reportes → CSV · movimientos**.
 
 ### Editar
 

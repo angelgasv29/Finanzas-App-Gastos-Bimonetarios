@@ -107,11 +107,16 @@ def data_table(
     rows: Iterable[Sequence[Any]],
     *,
     align_right: Sequence[int] = (),
-) -> None:
+    scroll_height: int | None = None,
+) -> ui.html:
     """Tabla simple con las cabeceras y las filas ya formateadas.
 
     Las celdas de texto se escapan; las que ya son HTML de la aplicación se
     marcan con :class:`RawHtml` (``chip_html``, ``bar_html`` y ``raw``).
+
+    :param scroll_height: si se indica, la tabla queda dentro de un contenedor
+        con esa altura máxima y barra de desplazamiento vertical. La cabecera
+        se mantiene fija para no perder las columnas al bajar.
     """
     right = set(align_right)
 
@@ -130,4 +135,10 @@ def data_table(
         + "</tr>"
         for row in rows
     )
-    ui.html(f'<table class="data"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>')
+    table = f'<table class="data"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+    if scroll_height is not None:
+        table = (
+            '<div class="data-scroll" '
+            f'style="max-height:{int(scroll_height)}px">{table}</div>'
+        )
+    return ui.html(table)

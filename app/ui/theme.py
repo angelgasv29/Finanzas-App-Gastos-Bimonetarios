@@ -126,6 +126,13 @@ def theme_css(theme: str = "dark") -> str:
     table.data td {{ padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }}
     table.data tr:hover td {{ background: var(--bg-2); }}
 
+    .data-scroll {{ overflow: auto; border: 1px solid var(--line-soft); border-radius: 10px; }}
+    .data-scroll table.data thead th {{ position: sticky; top: 0; z-index: 1; background: var(--bg-1); }}
+    .tx-toolbar .q-field {{ margin: 0; }}
+    .tx-acc .q-expansion-item__container {{ border-radius: 10px; }}
+    .tx-acc .q-item {{ min-height: 42px; padding: 0 10px; }}
+    .tx-acc .q-expansion-item__content {{ padding: 0 10px 6px; }}
+
     .empty {{ text-align: center; padding: 34px; color: var(--txt-1); font-style: italic; }}
 
     .nicegui-content {{ padding: 0; }}

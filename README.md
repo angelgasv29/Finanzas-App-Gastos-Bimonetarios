@@ -80,6 +80,7 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 - **Categorías dinámicas:** cada categoría define qué campos aplican (cantidad, unidad, marca, IVA, naturaleza…) y permite campos personalizados de texto, número, lista y sí/no.
 - **Editor de compras:** corrección y borrado con recálculo bidireccional Bs/USD, cambio de categoría, tasa de IVA editable, vista previa y validación.
 - **Registro continuo:** la fecha, la categoría y la tasa de IVA se pueden conservar entre compras para no repetirlas; un aviso muestra cuándo la fecha quedó fijada y un botón vuelve al día de hoy.
+- **Movimientos localizables:** buscador por producto/categoría/comercio/notas, filtro por categoría, vista en cascada por mes y lista con barra de desplazamiento y cabecera fija.
 - **Autocompletado tolerante a erratas:** busca por nombre, SKU, categoría, marca o comercio; al elegir un producto recupera sus datos y los de su última compra. Si escribes una variante parecida, sugiere el valor existente y evita duplicados al guardar.
 - **Tasa manual persistente:** se guarda en la configuración y sobrevive a la recarga; se libera al sincronizar con el BCV.
 - **OCR de tickets:** flujo con RapidOCR (ONNX, sin binarios externos) o texto pegado, tabla editable e importación por lote.
@@ -127,7 +128,7 @@ Todo ocurre **en tu computadora**. Sin nube, sin cuentas, sin que tus finanzas v
 | Excel | openpyxl | Libro de 6 hojas. |
 | OCR | RapidOCR (ONNX) | Opcional; también acepta texto pegado. |
 | Tasas | httpx | Tres endpoints públicos; se usa el primero que responda. |
-| Pruebas | pytest + doctests | 521 pruebas automatizadas. |
+| Pruebas | pytest + doctests | 523 pruebas automatizadas. |
 
 **Arquitectura de ejecución:** un único proceso NiceGUI con SQLite. No hay un backend separado, un frontend estático que compilar ni un servicio externo obligatorio.
 
@@ -261,7 +262,7 @@ La suite cubre, entre otros:
 - persistencia SQLite y repositorio;
 - flujos de interfaz con `nicegui.testing.user_simulation`.
 
-**Estado actual:** 521 pruebas aprobadas.
+**Estado actual:** 523 pruebas aprobadas.
 
 ---
 

@@ -19,7 +19,10 @@ from ...core.constants import (
     UNIT_OPTIONS,
     get_origin_label,
 )
+from ...core.money import format_bs, format_usd
 from ...core.suggestions import best_match, normalize_text, similar_values
+from ...core.text import escape_html
+from ...domain import filters as domain_filters
 from ...domain import prices as domain_prices
 from ...domain import transactions as domain_tx
 from ...domain import vat
@@ -35,6 +38,20 @@ VAT_LABELS = {
     "mas_iva": "IVA + tasa indicada",
 }
 DEFAULT_VAT_PERCENT = 16.0
+MONTH_NAMES = (
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+)
 
 
 def _vat_percent(value: Any) -> float:
@@ -810,18 +827,78 @@ def _build(state: AppState) -> None:
             refresh_preview()
 
         with c.card():
-            txs = sorted(
+            all_txs = sorted(
                 state.transactions(),
                 key=lambda tx: (str(tx.get("date") or ""), tx.get("id") or 0),
                 reverse=True,
             )
-            c.section_title("Movimientos recientes", c.chip_html(f"{len(txs)} en total"))
-            if not txs:
+            c.section_title(
+                "Movimientos recientes",
+                c.chip_html(f"{len(all_txs)} en total"),
+            )
+            if not all_txs:
                 ui.html(c.empty_html("Todavía no hay movimientos en este entorno."))
                 return
-            c.data_table(
-                ["#", "Fecha", "Producto", "Categoría", "Comercio", "Origen", "Total"],
-                [
+
+            with ui.row().classes("tx-toolbar w-full items-end gap-2"):
+                search = (
+                    ui.input(
+                        "Buscar producto, categoría, comercio, notas o campo personalizado"
+                    )
+                    .props("outline dense clearable")
+                    .classes("w-full md:flex-1")
+                    .mark("tx-search")
+                )
+                category_filter = (
+                    ui.select(
+                        {
+                            "": "Todas las categorías",
+                            **{
+                                cat["id"]: cat["name"]
+                                for cat in state.categories
+                            },
+                        },
+                        value="",
+                        label="Categoría",
+                    )
+                    .props("outline dense")
+                    .classes("w-full md:w-56")
+                    .mark("tx-category")
+                )
+                view_mode = (
+                    ui.select(
+                        {
+                            "lista": "Lista con desplazamiento",
+                            "cascada": "Cascada por mes",
+                        },
+                        value="lista",
+                        label="Vista",
+                    )
+                    .props("outline dense")
+                    .classes("w-full md:w-60")
+                    .mark("tx-view")
+                )
+                ui.button("Limpiar", on_click=lambda: clear_filters()).props(
+                    "flat dense"
+                ).mark("tx-clear")
+
+            count_label = ui.html("").classes("w-full")
+            listing = ui.column().classes("w-full gap-2")
+
+            def month_label(key: str) -> str:
+                if not key:
+                    return "Sin fecha"
+                parts = key.split("-")
+                if len(parts) < 2:
+                    return key
+                try:
+                    month = MONTH_NAMES[int(parts[1]) - 1]
+                except (ValueError, IndexError):
+                    return key
+                return f"{month} {parts[0]}"
+
+            def table_rows(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+                return [
                     (
                         str(tx.get("id")),
                         tx.get("date") or "—",
@@ -831,51 +908,158 @@ def _build(state: AppState) -> None:
                         get_origin_label(tx),
                         state.fmt(tx.get("amountUsd"), tx.get("amountBs")),
                     )
-                    for tx in txs[:20]
-                ],
-                align_right=(6,),
-            )
+                    for tx in items
+                ]
+
+            def refresh_listing() -> None:
+                query = (search.value or "").strip()
+                filtered = domain_filters.filter_transactions(
+                    all_txs,
+                    query=query,
+                    categories=state.categories,
+                )
+                selected_category = category_filter.value or ""
+                if selected_category:
+                    filtered = [
+                        tx
+                        for tx in filtered
+                        if tx.get("categoryId") == selected_category
+                    ]
+                filtered = domain_filters.sort_transactions_desc(filtered)
+                listing.clear()
+                shown = len(filtered)
+                count_label.content = (
+                    f'<div class="muted text-xs">Mostrando <b>{shown}</b> de '
+                    f"<b>{len(all_txs)}</b> movimientos"
+                    + (
+                        f' · búsqueda: «{escape_html(query)}»'
+                        if query
+                        else ""
+                    )
+                    + "</div>"
+                )
+
+                if not filtered:
+                    with listing:
+                        ui.html(
+                            c.empty_html(
+                                "Sin movimientos con los filtros actuales."
+                            )
+                        )
+                    return
+
+                headers = [
+                    "#",
+                    "Fecha",
+                    "Producto",
+                    "Categoría",
+                    "Comercio",
+                    "Origen",
+                    "Total",
+                ]
+                with listing:
+                    if (view_mode.value or "lista") == "cascada":
+                        by_month: dict[str, list[dict[str, Any]]] = {}
+                        for tx in filtered:
+                            key = str(tx.get("date") or "")[:7]
+                            by_month.setdefault(key, []).append(tx)
+                        months = sorted(
+                            (key for key in by_month if key), reverse=True
+                        )
+                        if "" in by_month:
+                            months.append("")
+                        for index, key in enumerate(months):
+                            group = by_month[key]
+                            total_bs = sum(
+                                float(tx.get("amountBs") or 0)
+                                for tx in group
+                            )
+                            total_usd = sum(
+                                float(tx.get("amountUsd") or 0)
+                                for tx in group
+                            )
+                            caption = (
+                                f"{len(group)} movimientos · "
+                                f"{format_bs(total_bs)} · "
+                                f"{format_usd(total_usd, state.decimals)}"
+                            )
+                            with ui.expansion(
+                                month_label(key),
+                                caption=caption,
+                                value=index == 0,
+                            ).classes("w-full tx-acc").mark(
+                                f"tx-month-{key or 'sin-fecha'}"
+                            ):
+                                c.data_table(
+                                    headers,
+                                    table_rows(group),
+                                    align_right=(6,),
+                                    scroll_height=340,
+                                )
+                    else:
+                        table = c.data_table(
+                            headers,
+                            table_rows(filtered),
+                            align_right=(6,),
+                            scroll_height=460,
+                        )
+                        table.mark("tx-list")
+
+            def clear_filters() -> None:
+                search.value = ""
+                category_filter.value = ""
+                view_mode.value = "lista"
+                refresh_listing()
+
+            search.on_value_change(lambda _e=None: refresh_listing())
+            category_filter.on_value_change(lambda _e=None: refresh_listing())
+            view_mode.on_value_change(lambda _e=None: refresh_listing())
+            refresh_listing()
 
         # El original corregía las compras con ``openTxEditor`` (editar o borrar).
-        if txs:
-            with c.card():
-                c.section_title("Corregir un movimiento")
-                ui.html(
-                    '<div class="muted">Elige una compra para editar sus datos o para '
-                    "borrarla. La lista muestra las 50 más recientes.</div>"
+        with c.card():
+            c.section_title("Corregir un movimiento")
+            ui.html(
+                '<div class="muted">Elige una compra para editar sus datos o para '
+                "borrarla. La lista incluye todos los movimientos del entorno; "
+                "escribe en el campo para filtrar.</div>"
+            )
+            options = {
+                tx.get("id"): (
+                    f'#{tx.get("id")} · {tx.get("date") or "—"} · '
+                    f'{tx.get("productName") or "—"} · '
+                    f'{state.fmt(tx.get("amountUsd"), tx.get("amountBs"))}'
                 )
-                options = {
-                    tx.get("id"): (
-                        f'#{tx.get("id")} · {tx.get("date") or "—"} · '
-                        f'{tx.get("productName") or "—"} · '
-                        f'{state.fmt(tx.get("amountUsd"), tx.get("amountBs"))}'
-                    )
-                    for tx in txs[:50]
-                }
-                pick = ui.select(options, label="Movimiento", with_input=True).classes(
-                    "w-full"
+                for tx in all_txs
+            }
+            pick = (
+                ui.select(options, label="Movimiento", with_input=True)
+                .classes("w-full")
+                .mark("tx-edit-picker")
+            )
+
+            def chosen() -> dict[str, Any] | None:
+                tx_id = pick.value
+                if tx_id is None:
+                    ui.notify("Elige un movimiento.", type="warning")
+                    return None
+                return next(
+                    (tx for tx in all_txs if tx.get("id") == tx_id), None
                 )
 
-                def chosen() -> dict[str, Any] | None:
-                    tx_id = pick.value
-                    if tx_id is None:
-                        ui.notify("Elige un movimiento.", type="warning")
-                        return None
-                    return next((tx for tx in txs if tx.get("id") == tx_id), None)
+            def edit() -> None:
+                tx = chosen()
+                if tx is not None:
+                    _open_editor(state, tx)
 
-                def edit() -> None:
-                    tx = chosen()
-                    if tx is not None:
-                        _open_editor(state, tx)
+            def remove() -> None:
+                tx = chosen()
+                if tx is not None:
+                    _confirm_delete(state, tx)
 
-                def remove() -> None:
-                    tx = chosen()
-                    if tx is not None:
-                        _confirm_delete(state, tx)
-
-                with ui.row().classes("gap-2"):
-                    ui.button("Editar", on_click=edit).props("outline color=primary")
-                    ui.button("Borrar", on_click=remove).props("outline color=negative")
+            with ui.row().classes("gap-2"):
+                ui.button("Editar", on_click=edit).props("outline color=primary")
+                ui.button("Borrar", on_click=remove).props("outline color=negative")
 
 
 def _open_editor(state: AppState, tx: dict[str, Any]) -> None:
